@@ -26,3 +26,11 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # "brands" checks that the domain is registered in
+          # home-assistant/brands, which supplies the icon shown in the UI.
+          # That is a pull request to a separate repository and is only a
+          # requirement for the HACS *default* list -- installing this as a
+          # custom repository works without it. Drop this ignore when the
+          # brands PR is merged, which is also the point at which this
+          # integration could be submitted to the default list.
+          ignore: brands

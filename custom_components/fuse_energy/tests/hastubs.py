@@ -103,3 +103,32 @@ def _add_external(hass, metadata, rows):
 stats.async_add_external_statistics = _add_external
 stats.get_last_statistics = lambda *a, **k: {}
 stats.statistics_during_period = lambda *a, **k: {}
+
+# aiohttp belongs to Home Assistant, not to us: the integration declares no
+# requirements and uses the ClientSession that HA hands it. On a machine with HA
+# installed the real package is already importable and is left alone; on a bare
+# checkout (CI, or a contributor who has only cloned the repo) these stand-ins
+# let the modules import. The tests never make a request -- ClientTimeout is
+# constructed at import time and the rest are only type annotations.
+try:  # pragma: no cover - depends on the environment, not the code under test
+    import aiohttp  # noqa: F401
+except ModuleNotFoundError:
+    aio = _module("aiohttp")
+
+    class ClientError(Exception):
+        """Stand-in for aiohttp.ClientError."""
+
+    class ClientTimeout:
+        def __init__(self, total: float | None = None, **kw: Any) -> None:
+            self.total = total
+
+    class ClientSession:
+        """Annotation-only stand-in; the suite never opens a session."""
+
+    class ClientResponse:
+        """Annotation-only stand-in."""
+
+    aio.ClientError = ClientError
+    aio.ClientTimeout = ClientTimeout
+    aio.ClientSession = ClientSession
+    aio.ClientResponse = ClientResponse
