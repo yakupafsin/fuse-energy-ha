@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Resize the artwork in brands/src/ to the sizes home-assistant/brands requires.
+"""Resize the artwork in brands/src/ into the integration's brand/ directory.
 
     python3 brands/make_assets.py
 
-See brands/README.md for the source files, the output sizes, and how to replace
-the artwork. Requires Pillow.
+Home Assistant 2026.3 serves brand images for custom integrations straight from
+the integration package, so the outputs live in custom_components/fuse_energy/
+brand/ and ship with the integration -- no submission to home-assistant/brands.
+
+See brands/README.md for the source files and how to replace the artwork.
+Requires Pillow.
 """
 from __future__ import annotations
 
@@ -14,7 +18,7 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "src"
-OUT = HERE / "fuse_energy"
+OUT = HERE.parent / "custom_components" / "fuse_energy" / "brand"
 
 # Home Assistant asks for each asset at 1x and 2x. Icons are square; logos keep
 # their own proportions and are sized by height.

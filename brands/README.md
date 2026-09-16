@@ -1,21 +1,32 @@
 # Brand assets
 
-Artwork for the `fuse_energy` domain, sized to the
-[home-assistant/brands](https://github.com/home-assistant/brands) specification
-so it can be submitted without reprocessing.
+Source artwork and the script that resizes it. The images it produces live in
+[`custom_components/fuse_energy/brand/`](../custom_components/fuse_energy/brand)
+and ship with the integration.
 
-| File | Size | Spec |
-| --- | --- | --- |
-| `fuse_energy/icon.png` | 256×256 | icons must be 1:1 |
-| `fuse_energy/icon@2x.png` | 512×512 | hDPI icon |
-| `fuse_energy/logo.png` | 747×256 | logo, shortest side 128–256 |
-| `fuse_energy/logo@2x.png` | 1494×512 | hDPI logo, shortest side 256–512 |
-| `fuse_energy/dark_logo.png` | 747×256 | wordmark lightened for dark themes |
-| `fuse_energy/dark_logo@2x.png` | 1494×512 | hDPI dark logo |
+## Why they ship with the integration
 
-All are PNG with transparency and trimmed of surrounding whitespace. The icon is
-the square mark with the wordmark cut away, padded to 1:1 rather than stretched,
-so the mark keeps its proportions.
+Home Assistant 2026.3 added the
+[Brands Proxy API](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api).
+A custom integration now supplies its own images from a `brand/` directory
+inside the integration package, and those take priority over the brands CDN. No
+manifest key, and no pull request to `home-assistant/brands` — that repository
+no longer accepts additions for custom components.
+
+## Files
+
+| Output | Size |
+| --- | --- |
+| `brand/icon.png` | 256×256 |
+| `brand/icon@2x.png` | 512×512 |
+| `brand/logo.png` | 747×256 |
+| `brand/logo@2x.png` | 1494×512 |
+| `brand/dark_logo.png` | 747×256 |
+| `brand/dark_logo@2x.png` | 1494×512 |
+
+Sizes follow the brands specification — icons square, logos 128–256px on the
+shortest side and 256–512px for hDPI — which the proxy API does not require but
+which keeps the images correct at the sizes Home Assistant renders them.
 
 A `dark_` pair exists because the wordmark is near-black and would otherwise
 disappear against Home Assistant's default dark theme. The icon needs no dark
@@ -23,8 +34,7 @@ variant — the orange field reads on both.
 
 ## Regenerating
 
-Do not edit the files above by hand — they are resized from the artwork in
-`brands/src/`:
+Do not edit the outputs by hand. They are resized from `brands/src/`:
 
 | Source | Used for |
 | --- | --- |
@@ -36,36 +46,10 @@ Do not edit the files above by hand — they are resized from the artwork in
 python3 brands/make_assets.py
 ```
 
-Requires Pillow. The script only resizes: it does no cropping, colour detection
-or recolouring, so replacing the artwork is a matter of dropping in new source
-files at whatever resolution you have. An earlier version derived all six
-outputs from a single flattened lockup by finding the mark by colour — that
-worked for exactly one image and would have silently mis-cropped a redraw at a
-different scale or hue.
+Requires Pillow. The script only resizes: no cropping, colour detection or
+recolouring, so replacing the artwork means dropping in new source files at
+whatever resolution you have.
 
 `src/lockup-dark.png` was produced from `src/lockup.png` by lightening the
-wordmark, and is kept as a source rather than regenerated so that a hand-authored
+wordmark, and is kept as a source rather than regenerated so a hand-authored
 dark variant can simply replace it.
-
-## Submitting upstream
-
-The brands repository states:
-
-> Custom integrations must not use Home Assistant branded images, as this might
-> confuse the end-user into thinking that the integration is an internal/official
-> integration.
-
-The current artwork puts a **fuse** inside the house, not Home Assistant's
-house-and-circuit mark, and uses orange rather than Home Assistant's blue — so
-it is the project's own mark, not a recolour of theirs. An earlier draft did use
-the circuit mark and was replaced for exactly this reason.
-
-What remains shared is a house glyph in a rounded square, which is a common
-idiom rather than anything exclusive. That is a judgement for the brands
-reviewers to make, but the rule's actual concern — a user mistaking this for an
-official integration — is not raised by a fuse symbol.
-
-Nothing depends on this either way. Until a domain is registered in the brands
-repository, Home Assistant shows a generic placeholder, which is the current
-behaviour — see the `ignore: brands` note in `.github/workflows/validate.yml`,
-which should be removed once a brands pull request is merged.
