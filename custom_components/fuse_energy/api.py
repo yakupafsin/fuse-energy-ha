@@ -232,7 +232,7 @@ def _parse_chart(payload: dict[str, Any], day: date) -> list[Bar]:
                 continue
 
             kwh = _as_decimal(bar.get("kWh", bar.get("kwh")))
-            cost = _as_decimal((bar.get("money") or {}).get("amount"))
+            cost = _hour_cost(entry, bar)
             if kwh is None or cost is None:
                 continue
 
@@ -295,6 +295,41 @@ def _parse_iso(value: str) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=_LOCAL_TZ)
+
+
+def _hour_cost(entry: dict[str, Any], bar: dict[str, Any]) -> Decimal | None:
+    """The cost of one hour, in pounds, at the best precision Fuse offers.
+
+    Each hour arrives with two figures: ``bar.money.amount`` at 2dp, and a
+    ``breakdown`` of components (USAGE, STANDING, ...) at 4dp. They disagree,
+    because ``money.amount`` is the breakdown TRUNCATED to the penny -- verified
+    against a full day, where it matched truncation 48/48 bars and nearest-penny
+    rounding only 12/48.
+
+    Truncating loses value every hour rather than averaging out, so summing the
+    2dp field understates the day. On 2026-09-15 it gave GBP 2.38 electricity
+    and GBP 0.72 gas, against GBP 2.50 and GBP 0.93 in the Fuse app; the
+    components reproduce the app exactly, and match the API's own
+    ``total_money`` for the day. Gas suffers worst, losing up to 0.87p on a 3p
+    hour.
+
+    Every component is summed, not just USAGE and STANDING, so a tariff that
+    adds one (a discount, a levy) stays correct without a code change.
+    ``money.amount`` remains the fallback for any hour with no usable
+    breakdown.
+    """
+    components = entry.get("breakdown")
+    if isinstance(components, list):
+        total: Decimal | None = None
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            amount = _as_decimal((component.get("value") or {}).get("amount"))
+            if amount is not None:
+                total = amount if total is None else total + amount
+        if total is not None:
+            return total
+    return _as_decimal((bar.get("money") or {}).get("amount"))
 
 
 def _as_decimal(value: Any) -> Decimal | None:

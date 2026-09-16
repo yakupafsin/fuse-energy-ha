@@ -13,5 +13,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/yakupafsin/fuse-energy-ha/issues",
   "requirements": [],
-  "version": "0.1.2"
+  "version": "0.1.3"
 }
