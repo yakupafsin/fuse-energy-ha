@@ -294,6 +294,15 @@ check("trpc error body raises",
 check("trpc error code is carried", code_of(rate_limited), "rate_limited")
 check("clean 200 dispatches", code_of({"result": {"data": {}}}), None)
 check("empty body dispatches", code_of({}), None)
+# Most people's sign-in already worked, so the body check must only ever fire on
+# a real errorCode. These are the shapes a success could plausibly take; any of
+# them raising would break everyone to fix one person.
+check("success flag dispatches", code_of({"result": {"data": {"success": True}}}), None)
+check("null error dispatches", code_of({"result": {"data": {"error": None}}}), None)
+check("empty error dispatches", code_of({"result": {"data": {"error": {}}}}), None)
+check("null errorCode dispatches",
+      code_of({"result": {"data": {"error": {"errorCode": None}}}}), None)
+check("unrecognised body dispatches", code_of({"data": {"whatever": 1}}), None)
 # The status-code paths, which the body check must not have displaced.
 check("4xx raises with its code",
       code_of({"error": {"code": "bad_request"}}, 400), "bad_request")
