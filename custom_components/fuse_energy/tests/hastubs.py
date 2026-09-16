@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 import types
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Generic, TypeVar
 
@@ -73,9 +74,53 @@ class DataUpdateCoordinator(Generic[T]):
         self.last_update_success = True
 class CoordinatorEntity(Generic[T]):
     def __init__(self, coordinator): self.coordinator = coordinator
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success
 uc.UpdateFailed = UpdateFailed
 uc.DataUpdateCoordinator = DataUpdateCoordinator
 uc.CoordinatorEntity = CoordinatorEntity
+
+# --- sensor platform ---
+sensor = _module("homeassistant.components.sensor")
+
+class SensorDeviceClass:
+    ENERGY = "energy"
+    MONETARY = "monetary"
+
+class SensorStateClass:
+    MEASUREMENT = "measurement"
+    TOTAL = "total"
+    TOTAL_INCREASING = "total_increasing"
+
+@dataclass(frozen=True, kw_only=True)
+class SensorEntityDescription:
+    key: str
+    name: str | None = None
+    device_class: str | None = None
+    state_class: str | None = None
+    native_unit_of_measurement: str | None = None
+    suggested_display_precision: int | None = None
+    icon: str | None = None
+
+class SensorEntity:
+    _attr_has_entity_name = False
+
+    @property
+    def available(self) -> bool:
+        return True
+
+sensor.SensorDeviceClass = SensorDeviceClass
+sensor.SensorStateClass = SensorStateClass
+sensor.SensorEntityDescription = SensorEntityDescription
+sensor.SensorEntity = SensorEntity
+
+dr = _module("homeassistant.helpers.device_registry")
+dr.DeviceInfo = dict
+
+ep = _module("homeassistant.helpers.entity_platform")
+class AddConfigEntryEntitiesCallback: ...
+ep.AddConfigEntryEntitiesCallback = AddConfigEntryEntitiesCallback
 
 # --- recorder ---
 _module("homeassistant.components")
