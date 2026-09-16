@@ -349,6 +349,34 @@ check("unrecognised body dispatches", code_of({"data": {"whatever": 1}}), None)
 check("4xx raises with its code",
       code_of({"error": {"code": "bad_request"}}, 400), "bad_request")
 check("5xx is transient", code_of({}, 503), "transient")
+# An unexplained 4xx must not return quietly: with no code to report, the flow
+# would advance to the code screen and wait for a message nobody sent.
+check("4xx with no body still raises", code_of({}, 400), "http_400")
+
+# The envelopes v0.1.2 did not look in. Each of these is a refusal arriving as
+# HTTP 200, which is the exact shape of the original bug -- reading only
+# result.data.error left the rest of them silent.
+trpc = {"error": {"json": {"message": "Too soon", "code": -32600,
+                           "data": {"code": "issue_otp_premature_retry"}}}}
+check("top-level tRPC error on a 200 is caught",
+      code_of(trpc), "issue_otp_premature_retry")
+check("the numeric JSON-RPC code is not reported instead",
+      code_of({"error": {"code": -32600, "data": {"code": "rate_limited"}}}),
+      "rate_limited")
+check("a batched tRPC error is caught", code_of([trpc]), "issue_otp_premature_retry")
+check("superjson-wrapped result error is caught",
+      code_of({"result": {"data": {"json": {"error": {"errorCode": "nope"}}}}}), "nope")
+check("a bare string error is caught",
+      code_of({"error": "issue_otp_premature_retry"}), "issue_otp_premature_retry")
+
+# ...and the same shapes when they mean success, which is the half that must
+# not regress: these bodies are what a working sign-in looks like.
+check("batched success dispatches", code_of([{"result": {"data": {}}}]), None)
+check("empty batch dispatches", code_of([]), None)
+check("superjson success dispatches",
+      code_of({"result": {"data": {"json": {"sent": True}}}}), None)
+check("a body that merely mentions data dispatches",
+      code_of({"result": {"data": {"code": "OK", "json": {"code": 200}}}}), None)
 
 # A dispatch failure must be distinguishable from the first leg failing, or the
 # config flow cannot say anything true about whose fault it was.

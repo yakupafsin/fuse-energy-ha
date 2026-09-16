@@ -131,15 +131,71 @@ async def _post_auth(
         raise FuseAuthTransient(f"network error talking to Fuse: {err}") from err
 
 
+async def _json_body(response: aiohttp.ClientResponse) -> Any:
+    """Parse a response body, or None if there isn't a usable one.
+
+    Kept separate from :func:`_json_or_empty` because a tRPC batch answers with
+    a LIST, and coercing that to {} is how a refusal turns back into silence.
+    """
+    try:
+        return await response.json(content_type=None)
+    except (aiohttp.ClientError, ValueError):
+        return None
+
+
 async def _json_or_empty(response: aiohttp.ClientResponse) -> dict[str, Any]:
     """Fuse occasionally answers an error with an empty or non-JSON body.
     Returning {} keeps the error path from turning into a parse traceback
     that hides the real status code."""
-    try:
-        parsed = await response.json(content_type=None)
-    except (aiohttp.ClientError, ValueError):
-        return {}
+    parsed = await _json_body(response)
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _refusal_code(payload: Any) -> str | None:
+    """Find Fuse's refusal code in a dispatch body, whatever envelope it used.
+
+    tRPC does not have one error envelope, it has several: the procedure's own
+    ``result.data.error``, a transport-level top-level ``error``, either wrapped
+    again in ``json`` by superjson, and any of those inside a list when the call
+    is batched. v0.1.2 fixed "read the status, ignore the body" by reading one
+    shape of the body -- which leaves the same silent failure for every other
+    shape, and a silent failure here is indistinguishable from success.
+
+    Only containers actually named ``error`` are searched. Missing a shape costs
+    one confused user; a false positive breaks sign-in for everyone it currently
+    works for, so the asymmetry is deliberate.
+    """
+    if isinstance(payload, list):
+        return next(filter(None, map(_refusal_code, payload)), None)
+    if not isinstance(payload, dict):
+        return None
+    for key in ("json", "result", "data"):
+        if (nested := payload.get(key)) is not None:
+            if code := _refusal_code(nested):
+                return code
+    if (error := payload.get("error")) is not None:
+        return _code_in_error(error)
+    return None
+
+
+def _code_in_error(error: Any) -> str | None:
+    """Read the code out of an error container, however deeply it is wrapped."""
+    if isinstance(error, str):
+        return error or None
+    if not isinstance(error, dict):
+        return None
+    if (value := error.get("errorCode")) not in (None, ""):
+        return str(value)
+    # Descend before falling back to ``code``: tRPC puts a numeric JSON-RPC code
+    # at the top and the useful string one underneath, so preferring the outer
+    # value would report -32600 instead of the reason Fuse gave.
+    for key in ("json", "data"):
+        if (nested := error.get(key)) is not None:
+            if code := _code_in_error(nested):
+                return code
+    if (value := error.get("code")) not in (None, ""):
+        return str(value)
+    return None
 
 
 def _interpret(payload: dict[str, Any]) -> ChallengeResult:
@@ -247,18 +303,16 @@ class FuseAuthFlow:
                     raise FuseAuthTransient(
                         f"Fuse's website returned {response.status} dispatching the SMS"
                     )
-                payload = await _json_or_empty(response)
-                if response.status >= 300:
-                    code = (payload.get("error") or {}).get("code")
-                else:
-                    # tRPC answers 200 and puts the failure in the body:
-                    # {"result": {"data": {"error": {"errorCode": "..."}}}}
-                    data = (payload.get("result") or {}).get("data") or {}
-                    code = (data.get("error") or {}).get("errorCode")
+                code = _refusal_code(await _json_body(response))
+                if code is None and response.status >= 300:
+                    # A refusal with no parseable body still has to surface: an
+                    # unexplained 4xx that returns quietly puts the user back on
+                    # the code screen waiting for a message nobody sent.
+                    code = f"http_{response.status}"
                 if code:
                     raise FuseSmsNotSent(
                         f"Fuse declined to send the verification SMS ({code})",
-                        code=str(code),
+                        code=code,
                     )
         except aiohttp.ClientError as err:
             raise FuseAuthTransient(f"network error dispatching the SMS: {err}") from err
