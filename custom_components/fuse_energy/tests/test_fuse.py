@@ -227,6 +227,55 @@ check("snapshot today total", round(snap.today_kwh, 6), 6.0)
 check("snapshot last hour", snap.last_hour_kwh, 3.0)
 check("snapshot last hour time", iso(snap.last_hour_start), "2026-01-15T11:00Z")
 
+# --- 17. The SMS dispatch reports errors that arrive with an HTTP 200 ---------
+# tRPC puts application errors in the body and still answers 200. Checking only
+# the status made a failed dispatch look like a success: the flow moved on to
+# the code step and the user waited for a message that was never sent.
+from fuse_energy.auth import FuseAuthError, FuseAuthFlow  # noqa: E402
+
+
+class _FakeResponse:
+    def __init__(self, status, body):
+        self.status, self._body = status, body
+
+    async def json(self, **_kw):
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, body, status=200):
+        self._body, self._status = body, status
+        self.calls = []
+
+    def post(self, url, **kw):
+        self.calls.append((url, kw))
+        return _FakeResponse(self._status, self._body)
+
+
+def dispatch(body, status=200):
+    """Run the SMS dispatch against a canned response; return the raised code."""
+    session = _FakeSession(body, status)
+    flow = FuseAuthFlow(session, device_id="test-device")
+    try:
+        asyncio.run(flow._async_dispatch_sms("+447700900123"))
+    except FuseAuthError as err:
+        return err.code
+    return None
+
+
+trpc_error = {"result": {"data": {"error": {"errorCode": "incorrect_phone_number"}}}}
+check("trpc error body raises", dispatch(trpc_error), "incorrect_phone_number")
+check("trpc error code is carried", dispatch(
+    {"result": {"data": {"error": {"errorCode": "rate_limited"}}}}), "rate_limited")
+check("clean 200 dispatches", dispatch({"result": {"data": {}}}), None)
+check("empty body dispatches", dispatch({}), None)
+
 # --- report ------------------------------------------------------------------
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed\n")
 for name in PASS:

@@ -87,8 +87,16 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.debug("Transient failure requesting a code: %s", err)
                 errors["base"] = "cannot_connect"
             except FuseAuthError as err:
-                _LOGGER.debug("Fuse rejected the sign-in: %s", err)
-                errors["base"] = "invalid_phone"
+                # Only "incorrect_phone_number" is about the number. Anything
+                # else means the SMS dispatch itself failed, and telling someone
+                # to check their number format sends them looking in the wrong
+                # place -- their number is usually fine.
+                if err.code == "incorrect_phone_number":
+                    _LOGGER.debug("Fuse did not recognise the number: %s", err)
+                    errors["base"] = "invalid_phone"
+                else:
+                    _LOGGER.error("Fuse did not send the verification SMS: %s", err)
+                    errors["base"] = "sms_not_sent"
             else:
                 return await self.async_step_code()
 

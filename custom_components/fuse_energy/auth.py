@@ -215,8 +215,10 @@ class FuseAuthFlow:
     async def _async_dispatch_sms(self, phone_number: str) -> None:
         """Ask www.fuseenergy.com to actually send the code.
 
-        This one is unauthenticated but version-gated: it inspects
-        x-fuse-app-version and refuses clients it considers stale.
+        This endpoint is tRPC, and tRPC reports application errors in the BODY
+        with an HTTP 200. Checking only the status code made every failure look
+        like a success: the flow advanced to the code step and the user waited
+        for a message that was never sent. The body is the authority here.
         """
         try:
             async with self._session.post(
@@ -228,19 +230,28 @@ class FuseAuthFlow:
                 },
                 timeout=_TIMEOUT,
             ) as response:
-                if response.status < 300:
-                    return
                 if response.status >= 500:
                     raise FuseAuthTransient(
                         f"Fuse's website returned {response.status} dispatching the SMS"
                     )
                 payload = await _json_or_empty(response)
-                code = (payload.get("error") or {}).get("code") or "sms_dispatch_failed"
-                raise FuseAuthError(
-                    "Fuse declined to send the verification SMS", code=str(code)
-                )
+                if response.status >= 300:
+                    code = (payload.get("error") or {}).get("code") or "sms_dispatch_failed"
+                    raise FuseAuthError(
+                        "Fuse declined to send the verification SMS", code=str(code)
+                    )
         except aiohttp.ClientError as err:
             raise FuseAuthTransient(f"network error dispatching the SMS: {err}") from err
+
+        # {"result": {"data": {"error": {"errorCode": "incorrect_phone_number"}}}}
+        error = (
+            ((payload.get("result") or {}).get("data") or {}).get("error") or {}
+        )
+        if error_code := error.get("errorCode"):
+            raise FuseAuthError(
+                f"Fuse declined to send the verification SMS ({error_code})",
+                code=str(error_code),
+            )
 
     async def async_submit_code(self, code: str) -> ChallengeResult:
         """Answer the SMS challenge with the six-digit code."""
