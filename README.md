@@ -149,7 +149,8 @@ a genuine finding.
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to report a bug, run the
 tests and open a pull request. By taking part you agree to the
 [Code of Conduct](CODE_OF_CONDUCT.md). Security issues go
-[privately](SECURITY.md), not into a public issue.
+[privately](SECURITY.md), not into a public issue. For questions rather than
+bugs, see [SUPPORT.md](SUPPORT.md).
 
 ### Running the tests
 
