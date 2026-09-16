@@ -1,0 +1,70 @@
+name: Bug report
+description: Something is wrong with the data, the setup flow, or the statistics.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Fuse's API is private and mapped from observed
+        traffic, so an unfamiliar payload shape is a genuine finding.
+
+        **Please do not paste tokens, `.storage` contents, or your phone
+        number.** Nothing here needs them to reproduce a problem.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.9.2"
+    validations:
+      required: true
+  - type: input
+    id: integration-version
+    attributes:
+      label: Integration version
+      description: From `custom_components/fuse_energy/manifest.json`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: supplies
+    attributes:
+      label: Which supplies are on your account
+      multiple: true
+      options:
+        - Electricity import
+        - Electricity export
+        - Gas
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings → Devices & Services → Fuse Energy → **Download diagnostics**,
+        and attach the file. It excludes tokens and your phone number by design.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug logs
+      description: |
+        Only if the problem is not visible in diagnostics. Enable with:
+
+        ```yaml
+        logger:
+          logs:
+            custom_components.fuse_energy: debug
+        ```
+      render: shell
+    validations:
+      required: false
