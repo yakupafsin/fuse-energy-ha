@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to Fuse Energy",
+        "description": "Enter the mobile number your Fuse account uses, in international format (for example +447700900123). Fuse will text you a verification code.",
+        "data": {
+          "phone_number": "Mobile number"
+        }
+      },
+      "code": {
+        "title": "Enter your code",
+        "description": "Enter the 6-digit code Fuse sent to {phone_number}.",
+        "data": {
+          "code": "Verification code"
+        }
+      },
+      "identity": {
+        "title": "Confirm your identity",
+        "description": "Fuse needs a little more information before it will sign you in. {prompt}"
+      },
+      "premises": {
+        "title": "Choose a property",
+        "description": "Your Fuse account covers more than one property. Pick the one to add; you can run this again to add the others.",
+        "data": {
+          "premises_id": "Property"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in to Fuse Energy again",
+        "description": "Your Fuse session has expired. Continue to have a new verification code sent to {phone_number}."
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Fuse. Check your internet connection and try again.",
+      "invalid_phone": "Fuse did not accept that number. Use international format, for example +447700900123.",
+      "invalid_code": "That code was not accepted. It may have expired -- request a new one if it keeps failing.",
+      "invalid_identity": "Fuse did not accept those details. Check they match what is on your Fuse account."
+    },
+    "abort": {
+      "already_configured": "This property is already set up.",
+      "no_premises": "Signed in successfully, but no properties were found on this Fuse account.",
+      "unsupported_challenge": "Fuse asked for a verification step this integration does not support yet.",
+      "wrong_account": "Those credentials are for a different Fuse account than the one being re-authenticated.",
+      "reauth_successful": "Successfully signed back in to Fuse Energy."
+    }
+  }
+}
