@@ -24,6 +24,7 @@ from .auth import (
     FuseAuthError,
     FuseAuthFlow,
     FuseAuthTransient,
+    FuseSmsNotSent,
     IdentityQuestion,
     NeedsIdentity,
     Tokens,
@@ -86,17 +87,23 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
             except FuseAuthTransient as err:
                 _LOGGER.debug("Transient failure requesting a code: %s", err)
                 errors["base"] = "cannot_connect"
-            except FuseAuthError as err:
-                # Only "incorrect_phone_number" is about the number. Anything
-                # else means the SMS dispatch itself failed, and telling someone
-                # to check their number format sends them looking in the wrong
-                # place -- their number is usually fine.
+            # Which leg failed decides what is true to tell the user, and only
+            # auth.py knows that -- the two legs report errors in different
+            # vocabularies. Reaching FuseSmsNotSent means the number was good
+            # enough to start a flow, so blaming the number would be wrong;
+            # a failure from the first leg is almost always the number itself.
+            except FuseSmsNotSent as err:
                 if err.code == "incorrect_phone_number":
                     _LOGGER.debug("Fuse did not recognise the number: %s", err)
                     errors["base"] = "invalid_phone"
                 else:
-                    _LOGGER.error("Fuse did not send the verification SMS: %s", err)
+                    _LOGGER.warning("Fuse did not send the verification SMS: %s", err)
                     errors["base"] = "sms_not_sent"
+            except FuseAuthError as err:
+                _LOGGER.debug("Fuse would not start the sign-in: %s", err)
+                errors["base"] = (
+                    "cannot_connect" if err.code == "bad_response" else "invalid_phone"
+                )
             else:
                 return await self.async_step_code()
 

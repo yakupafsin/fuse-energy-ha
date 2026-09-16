@@ -23,6 +23,13 @@ sys.path.insert(0, str(_CUSTOM_COMPONENTS))
 from fuse_energy.api import Bar, _parse_chart  # noqa: E402
 from fuse_energy.coordinator import _summarise  # noqa: E402
 from fuse_energy import statistics as fuse_stats  # noqa: E402
+from fuse_energy.auth import (  # noqa: E402
+    FuseAuthError,
+    FuseAuthFlow,
+    FuseAuthTransient,
+    FuseSmsNotSent,
+)
+from fuse_energy.const import WEB_APP_VERSION  # noqa: E402
 from homeassistant.components.recorder import statistics as stat_stub  # noqa: E402
 
 PASS, FAIL = [], []
@@ -231,7 +238,6 @@ check("snapshot last hour time", iso(snap.last_hour_start), "2026-01-15T11:00Z")
 # tRPC puts application errors in the body and still answers 200. Checking only
 # the status made a failed dispatch look like a success: the flow moved on to
 # the code step and the user waited for a message that was never sent.
-from fuse_energy.auth import FuseAuthError, FuseAuthFlow  # noqa: E402
 
 
 class _FakeResponse:
@@ -259,22 +265,51 @@ class _FakeSession:
 
 
 def dispatch(body, status=200):
-    """Run the SMS dispatch against a canned response; return the raised code."""
+    """Run the SMS dispatch against a canned response.
+
+    Returns (raised, session). `raised` is None when the dispatch was treated as
+    successful, which is the case the original bug got wrong.
+    """
     session = _FakeSession(body, status)
     flow = FuseAuthFlow(session, device_id="test-device")
     try:
         asyncio.run(flow._async_dispatch_sms("+447700900123"))
-    except FuseAuthError as err:
-        return err.code
-    return None
+    except (FuseAuthError, FuseAuthTransient) as err:
+        return err, session
+    return None, session
 
 
-trpc_error = {"result": {"data": {"error": {"errorCode": "incorrect_phone_number"}}}}
-check("trpc error body raises", dispatch(trpc_error), "incorrect_phone_number")
-check("trpc error code is carried", dispatch(
-    {"result": {"data": {"error": {"errorCode": "rate_limited"}}}}), "rate_limited")
-check("clean 200 dispatches", dispatch({"result": {"data": {}}}), None)
-check("empty body dispatches", dispatch({}), None)
+def code_of(body, status=200):
+    raised, _ = dispatch(body, status)
+    if raised is None:
+        return None
+    return "transient" if isinstance(raised, FuseAuthTransient) else raised.code
+
+
+rate_limited = {"result": {"data": {"error": {"errorCode": "rate_limited"}}}}
+
+check("trpc error body raises",
+      code_of({"result": {"data": {"error": {"errorCode": "incorrect_phone_number"}}}}),
+      "incorrect_phone_number")
+check("trpc error code is carried", code_of(rate_limited), "rate_limited")
+check("clean 200 dispatches", code_of({"result": {"data": {}}}), None)
+check("empty body dispatches", code_of({}), None)
+# The status-code paths, which the body check must not have displaced.
+check("4xx raises with its code",
+      code_of({"error": {"code": "bad_request"}}, 400), "bad_request")
+check("5xx is transient", code_of({}, 503), "transient")
+
+# A dispatch failure must be distinguishable from the first leg failing, or the
+# config flow cannot say anything true about whose fault it was.
+raised, sent = dispatch(rate_limited)
+check("dispatch failure is FuseSmsNotSent", isinstance(raised, FuseSmsNotSent), True)
+
+# The request itself: right endpoint, and the version header the gate reads.
+url, kwargs = sent.calls[0]
+check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
+check("dispatch sends the version header",
+      kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
+check("dispatch sends phone under 'phone'", kwargs["json"], {"phone": "+447700900123"})
 
 # --- report ------------------------------------------------------------------
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed\n")
