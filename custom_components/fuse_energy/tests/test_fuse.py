@@ -1,7 +1,9 @@
 """Logic tests for the fuse_energy integration, run without Home Assistant."""
 from __future__ import annotations
 
+import ast
 import asyncio
+import json
 import sys
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -359,6 +361,50 @@ check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
 check("dispatch sends the version header",
       kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
 check("dispatch sends phone under 'phone'", kwargs["json"], {"phone": "+447700900123"})
+
+# --- config flow error keys --------------------------------------------------
+# Read the flow's source rather than importing it: config_flow pulls in
+# voluptuous and the real config-entries machinery, neither of which the stubs
+# carry. Parsing gets the same facts without that weight.
+#
+# What this guards is the mapping, not the wording. Naming an error key that has
+# no translation makes Home Assistant show the user the raw key, and a refusal
+# code is only ever reached by someone already stuck -- exactly when an
+# unreadable message costs the most.
+_FLOW = ast.parse((_CUSTOM_COMPONENTS / "fuse_energy" / "config_flow.py").read_text())
+
+refusals = next(
+    ast.literal_eval(node.value)
+    for node in ast.walk(_FLOW)
+    if isinstance(node, ast.AnnAssign)
+    if getattr(node.target, "id", None) == "_SMS_REFUSALS"
+)
+check("premature retry gets its own message",
+      refusals.get("issue_otp_premature_retry"), "sms_too_soon")
+check("a rejected number is still blamed on the number",
+      refusals.get("incorrect_phone_number"), "invalid_phone")
+
+# Every key the flow can put in errors["base"], however it gets there.
+assigned = {
+    node.value.value
+    for node in ast.walk(_FLOW)
+    if isinstance(node, ast.Assign)
+    for target in node.targets
+    if isinstance(target, ast.Subscript)
+    if getattr(target.value, "id", None) == "errors"
+    if isinstance(node.value, ast.Constant)
+    if isinstance(node.value.value, str)
+}
+used = assigned | set(refusals.values())
+check("the flow sets error keys at all", len(used) >= 5, True)
+
+for _name in ("strings.json", "translations/en.json"):
+    _declared = set(
+        json.loads((_CUSTOM_COMPONENTS / "fuse_energy" / _name).read_text())
+        ["config"]["error"]
+    )
+    check(f"every error key is translated in {_name}", sorted(used - _declared), [])
+    check(f"no unused error key in {_name}", sorted(_declared - used), [])
 
 # --- report ------------------------------------------------------------------
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed\n")

@@ -36,7 +36,8 @@
       "invalid_phone": "Fuse did not accept that number. Use international format, for example +447700900123.",
       "invalid_code": "That code was not accepted. It may have expired -- request a new one if it keeps failing.",
       "invalid_identity": "Fuse did not accept those details. Check they match what is on your Fuse account.",
-      "sms_not_sent": "Fuse accepted the number but did not send a code. This is usually temporary -- wait a few minutes and try again. If it persists, check the Home Assistant log for the reason Fuse gave."
+      "sms_not_sent": "Fuse accepted the number but did not send a code. This is usually temporary -- wait a few minutes and try again. If it persists, check the Home Assistant log for the reason Fuse gave.",
+      "sms_too_soon": "Fuse is limiting how often it will send a code and refused to send another one yet. Wait a few minutes without retrying, then try again."
     },
     "abort": {
       "already_configured": "This property is already set up.",
