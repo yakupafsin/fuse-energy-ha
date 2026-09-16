@@ -234,7 +234,44 @@ check("snapshot today total", round(snap.today_kwh, 6), 6.0)
 check("snapshot last hour", snap.last_hour_kwh, 3.0)
 check("snapshot last hour time", iso(snap.last_hour_start), "2026-01-15T11:00Z")
 
-# --- 17. The SMS dispatch reports errors that arrive with an HTTP 200 ---------
+# --- 17. Hourly cost comes from the 4dp breakdown, not the 2dp rounded field --
+# money.amount is the breakdown truncated to the penny, so summing it loses
+# value every hour instead of averaging out. Real figures for 2026-09-15: the
+# 2dp field gave GBP 2.38 electricity / GBP 0.72 gas, while the components gave
+# GBP 2.4977 / GBP 0.9288 -- and the Fuse app showed GBP 2.50 / GBP 0.93.
+def with_breakdown(bar, components):
+    return {"supplies": [{"supply_type": "ELEC_IMPORT",
+                          "bars": [{"bar": bar, "breakdown": components}]}]}
+
+
+def one_cost(payload, day=date(2026, 9, 15)):
+    parsed = _parse_chart(payload, day)
+    return parsed[0].cost_gbp if parsed else None
+
+
+hour0 = bar_payload(2026, 9, 15, 0, 0.422, "0.12")
+usage_and_standing = [
+    {"name": "USAGE", "value": {"amount": "0.1086"}, "kWh": "0.422"},
+    {"name": "STANDING", "value": {"amount": "0.0181"}, "kWh": None},
+]
+check("breakdown beats the rounded field",
+      one_cost(with_breakdown(hour0, usage_and_standing)), Decimal("0.1267"))
+# Every component, so a tariff that adds one stays correct with no code change.
+check("all components are summed",
+      one_cost(with_breakdown(hour0, usage_and_standing
+                              + [{"name": "LEVY", "value": {"amount": "0.0050"}}])),
+      Decimal("0.1317"))
+check("falls back with no breakdown",
+      one_cost(chart([("ELEC_IMPORT", [hour0])])), Decimal("0.12"))
+check("falls back on an empty breakdown",
+      one_cost(with_breakdown(hour0, [])), Decimal("0.12"))
+check("falls back when components carry no amount",
+      one_cost(with_breakdown(hour0, [{"name": "USAGE", "value": {}}])), Decimal("0.12"))
+check("skips malformed components",
+      one_cost(with_breakdown(hour0, ["nonsense", usage_and_standing[0]])),
+      Decimal("0.1086"))
+
+# --- 18. The SMS dispatch reports errors that arrive with an HTTP 200 ---------
 # tRPC puts application errors in the body and still answers 200. Checking only
 # the status made a failed dispatch look like a success: the flow moved on to
 # the code step and the user waited for a message that was never sent.
