@@ -1,7 +1,9 @@
 """Logic tests for the fuse_energy integration, run without Home Assistant."""
 from __future__ import annotations
 
+import ast
 import asyncio
+import json
 import sys
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -347,6 +349,34 @@ check("unrecognised body dispatches", code_of({"data": {"whatever": 1}}), None)
 check("4xx raises with its code",
       code_of({"error": {"code": "bad_request"}}, 400), "bad_request")
 check("5xx is transient", code_of({}, 503), "transient")
+# An unexplained 4xx must not return quietly: with no code to report, the flow
+# would advance to the code screen and wait for a message nobody sent.
+check("4xx with no body still raises", code_of({}, 400), "http_400")
+
+# The envelopes v0.1.2 did not look in. Each of these is a refusal arriving as
+# HTTP 200, which is the exact shape of the original bug -- reading only
+# result.data.error left the rest of them silent.
+trpc = {"error": {"json": {"message": "Too soon", "code": -32600,
+                           "data": {"code": "issue_otp_premature_retry"}}}}
+check("top-level tRPC error on a 200 is caught",
+      code_of(trpc), "issue_otp_premature_retry")
+check("the numeric JSON-RPC code is not reported instead",
+      code_of({"error": {"code": -32600, "data": {"code": "rate_limited"}}}),
+      "rate_limited")
+check("a batched tRPC error is caught", code_of([trpc]), "issue_otp_premature_retry")
+check("superjson-wrapped result error is caught",
+      code_of({"result": {"data": {"json": {"error": {"errorCode": "nope"}}}}}), "nope")
+check("a bare string error is caught",
+      code_of({"error": "issue_otp_premature_retry"}), "issue_otp_premature_retry")
+
+# ...and the same shapes when they mean success, which is the half that must
+# not regress: these bodies are what a working sign-in looks like.
+check("batched success dispatches", code_of([{"result": {"data": {}}}]), None)
+check("empty batch dispatches", code_of([]), None)
+check("superjson success dispatches",
+      code_of({"result": {"data": {"json": {"sent": True}}}}), None)
+check("a body that merely mentions data dispatches",
+      code_of({"result": {"data": {"code": "OK", "json": {"code": 200}}}}), None)
 
 # A dispatch failure must be distinguishable from the first leg failing, or the
 # config flow cannot say anything true about whose fault it was.
@@ -359,6 +389,50 @@ check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
 check("dispatch sends the version header",
       kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
 check("dispatch sends phone under 'phone'", kwargs["json"], {"phone": "+447700900123"})
+
+# --- config flow error keys --------------------------------------------------
+# Read the flow's source rather than importing it: config_flow pulls in
+# voluptuous and the real config-entries machinery, neither of which the stubs
+# carry. Parsing gets the same facts without that weight.
+#
+# What this guards is the mapping, not the wording. Naming an error key that has
+# no translation makes Home Assistant show the user the raw key, and a refusal
+# code is only ever reached by someone already stuck -- exactly when an
+# unreadable message costs the most.
+_FLOW = ast.parse((_CUSTOM_COMPONENTS / "fuse_energy" / "config_flow.py").read_text())
+
+refusals = next(
+    ast.literal_eval(node.value)
+    for node in ast.walk(_FLOW)
+    if isinstance(node, ast.AnnAssign)
+    if getattr(node.target, "id", None) == "_SMS_REFUSALS"
+)
+check("premature retry gets its own message",
+      refusals.get("issue_otp_premature_retry"), "sms_too_soon")
+check("a rejected number is still blamed on the number",
+      refusals.get("incorrect_phone_number"), "invalid_phone")
+
+# Every key the flow can put in errors["base"], however it gets there.
+assigned = {
+    node.value.value
+    for node in ast.walk(_FLOW)
+    if isinstance(node, ast.Assign)
+    for target in node.targets
+    if isinstance(target, ast.Subscript)
+    if getattr(target.value, "id", None) == "errors"
+    if isinstance(node.value, ast.Constant)
+    if isinstance(node.value.value, str)
+}
+used = assigned | set(refusals.values())
+check("the flow sets error keys at all", len(used) >= 5, True)
+
+for _name in ("strings.json", "translations/en.json"):
+    _declared = set(
+        json.loads((_CUSTOM_COMPONENTS / "fuse_energy" / _name).read_text())
+        ["config"]["error"]
+    )
+    check(f"every error key is translated in {_name}", sorted(used - _declared), [])
+    check(f"no unused error key in {_name}", sorted(_declared - used), [])
 
 # --- report ------------------------------------------------------------------
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed\n")

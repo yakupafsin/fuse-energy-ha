@@ -40,6 +40,16 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Reasons Fuse gives for refusing to send the code that we can turn into
+# specific advice. Anything not listed falls through to the generic message and
+# is logged at warning level, so a code we have never seen stays visible rather
+# than being flattened into "try again" -- which is how the silent failure
+# behind issue #6 went unnoticed in the first place.
+_SMS_REFUSALS: dict[str, str] = {
+    "incorrect_phone_number": "invalid_phone",
+    "issue_otp_premature_retry": "sms_too_soon",
+}
+
 # Fuse expects E.164. Nudging the user here avoids a round-trip through a
 # server-side validation error that only says "422".
 _PHONE_SCHEMA = vol.Schema(
@@ -93,9 +103,9 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
             # enough to start a flow, so blaming the number would be wrong;
             # a failure from the first leg is almost always the number itself.
             except FuseSmsNotSent as err:
-                if err.code == "incorrect_phone_number":
-                    _LOGGER.debug("Fuse did not recognise the number: %s", err)
-                    errors["base"] = "invalid_phone"
+                if explained := _SMS_REFUSALS.get(err.code or ""):
+                    _LOGGER.debug("Fuse declined to send the SMS: %s", err)
+                    errors["base"] = explained
                 else:
                     _LOGGER.warning("Fuse did not send the verification SMS: %s", err)
                     errors["base"] = "sms_not_sent"
