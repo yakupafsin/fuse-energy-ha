@@ -1,7 +1,6 @@
 {
   "domain": "fuse_energy",
   "name": "Fuse Energy",
-  "version": "0.1.0",
   "codeowners": [
     "@yakupafsin"
   ],
@@ -13,5 +12,6 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/yakupafsin/fuse-energy-ha/issues",
-  "requirements": []
+  "requirements": [],
+  "version": "0.1.0"
 }

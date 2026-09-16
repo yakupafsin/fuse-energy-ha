@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest something this integration should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check [the scope section of CONTRIBUTING.md](https://github.com/yakupafsin/fuse-energy-ha/blob/main/CONTRIBUTING.md#scope)
+        first — writing to a Fuse account and billing prediction are deliberately
+        out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve
+      description: The situation you are in, rather than the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true

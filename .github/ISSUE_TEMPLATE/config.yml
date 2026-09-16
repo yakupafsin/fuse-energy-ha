@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/yakupafsin/fuse-energy-ha/discussions
+    about: For "how do I" and "is this supposed to" — please ask here rather than opening a bug.
+  - name: Security issue
+    url: https://github.com/yakupafsin/fuse-energy-ha/security/advisories/new
+    about: Report credential exposure or auth problems privately, not in a public issue.

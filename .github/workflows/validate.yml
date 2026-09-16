@@ -1,0 +1,36 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Fuse changes its API without notice, and HACS/hassfest rules move too.
+    # A weekly run means breakage is found before a user reports it.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # "brands" checks that the domain is registered in
+          # home-assistant/brands, which supplies the icon shown in the UI.
+          # That is a pull request to a separate repository and is only a
+          # requirement for the HACS *default* list -- installing this as a
+          # custom repository works without it. Drop this ignore when the
+          # brands PR is merged, which is also the point at which this
+          # integration could be submitted to the default list.
+          ignore: brands

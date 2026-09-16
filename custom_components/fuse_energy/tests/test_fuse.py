@@ -5,11 +5,20 @@ import asyncio
 import sys
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 
-sys.path.insert(0, "/config/custom_components/fuse_energy/tests")
+# Resolved from this file, NOT hard-coded to /config. An absolute path happened
+# to work on the machine this was written on, but it silently imported whatever
+# copy of the integration was installed there rather than the one next to these
+# tests -- so a checkout elsewhere (CI, or anyone who clones the repo) could not
+# run them at all, and a local run was not testing the working tree.
+_TESTS = Path(__file__).resolve().parent
+_CUSTOM_COMPONENTS = _TESTS.parent.parent
+
+sys.path.insert(0, str(_TESTS))
 import hastubs  # noqa: F401  (installs the stub modules)
 
-sys.path.insert(0, "/config/custom_components")
+sys.path.insert(0, str(_CUSTOM_COMPONENTS))
 
 from fuse_energy.api import Bar, _parse_chart  # noqa: E402
 from fuse_energy.coordinator import _summarise  # noqa: E402
