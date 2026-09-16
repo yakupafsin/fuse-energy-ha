@@ -51,7 +51,16 @@ cards and automations.
 
 ### HACS (recommended)
 
-This is not yet in the HACS default list, so add it as a custom repository:
+This is not yet in the HACS default list, so it is added as a custom repository.
+If you have [My Home Assistant](https://my.home-assistant.io/) set up, one click
+does it:
+
+[![Open HACS repository on your Home Assistant instance.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=yakupafsin&repository=fuse-energy-ha&category=integration)
+
+Then **Download**, and **restart Home Assistant**.
+
+<details>
+<summary>Or add it by hand</summary>
 
 1. Open **HACS** → **Integrations**.
 2. Top-right menu (⋮) → **Custom repositories**.
@@ -59,6 +68,8 @@ This is not yet in the HACS default list, so add it as a custom repository:
    **Integration**. Click **Add**.
 4. Search HACS for **Fuse Energy** and click **Download**.
 5. **Restart Home Assistant.**
+
+</details>
 
 ### Manual
 
@@ -69,10 +80,13 @@ This is not yet in the HACS default list, so add it as a custom repository:
 
 ## Setup
 
-1. **Settings → Devices & Services → Add Integration → Fuse Energy**.
-2. Enter the mobile number on your Fuse account, in international format
-   (`+447700900123`), then the code Fuse texts you. Fuse sometimes asks a couple
-   of identity questions on top; the form adapts to whatever it asks.
+[![Add integration to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=fuse_energy)
+
+Or: **Settings → Devices & Services → Add Integration → Fuse Energy**.
+
+Then enter the mobile number on your Fuse account, in international format
+(`+447700900123`), followed by the code Fuse texts you. Fuse sometimes asks a
+couple of identity questions on top; the form adapts to whatever it asks.
 
 Nothing appears for up to an hour after setup. Fuse publishes consumption on a
 delay, and the integration deliberately refuses to import an hour until it has
