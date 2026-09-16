@@ -235,18 +235,16 @@ check("snapshot last hour", snap.last_hour_kwh, 3.0)
 check("snapshot last hour time", iso(snap.last_hour_start), "2026-01-15T11:00Z")
 
 # --- 17. Hourly cost comes from the 4dp breakdown, not the 2dp rounded field --
-# money.amount is the breakdown truncated to the penny, so summing it loses
-# value every hour instead of averaging out. Real figures for 2026-09-15: the
-# 2dp field gave GBP 2.38 electricity / GBP 0.72 gas, while the components gave
-# GBP 2.4977 / GBP 0.9288 -- and the Fuse app showed GBP 2.50 / GBP 0.93.
+# The fixture values are one real hour from 2026-09-15; see _breakdown_total for
+# why the 2dp field cannot be trusted.
 def with_breakdown(bar, components):
-    return {"supplies": [{"supply_type": "ELEC_IMPORT",
-                          "bars": [{"bar": bar, "breakdown": components}]}]}
+    payload = chart([("ELEC_IMPORT", [bar])])
+    payload["supplies"][0]["bars"][0]["breakdown"] = components
+    return payload
 
 
-def one_cost(payload, day=date(2026, 9, 15)):
-    parsed = _parse_chart(payload, day)
-    return parsed[0].cost_gbp if parsed else None
+def one_cost(payload):
+    return _parse_chart(payload, date(2026, 9, 15))[0].cost_gbp
 
 
 hour0 = bar_payload(2026, 9, 15, 0, 0.422, "0.12")
@@ -267,6 +265,11 @@ check("falls back on an empty breakdown",
       one_cost(with_breakdown(hour0, [])), Decimal("0.12"))
 check("falls back when components carry no amount",
       one_cost(with_breakdown(hour0, [{"name": "USAGE", "value": {}}])), Decimal("0.12"))
+# A free hour is real data, and must not be mistaken for a missing breakdown --
+# this is the whole reason the sum is distinguished from "nothing usable".
+check("a zero-cost hour does not fall back",
+      one_cost(with_breakdown(hour0, [{"name": "USAGE", "value": {"amount": "0"}}])),
+      Decimal("0"))
 check("skips malformed components",
       one_cost(with_breakdown(hour0, ["nonsense", usage_and_standing[0]])),
       Decimal("0.1086"))
