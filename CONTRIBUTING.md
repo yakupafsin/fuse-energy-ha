@@ -41,13 +41,18 @@ problem.
 ## Development
 
 No Home Assistant installation is needed to work on the parsing, DST and
-statistics logic — the test suite stubs the parts of HA it touches:
+statistics logic — the test suite stubs the parts of HA it touches. It does need
+`aiohttp`, which the integration imports directly and which is not stubbed, so
+the tests run against the real client:
 
 ```sh
 git clone https://github.com/yakupafsin/fuse-energy-ha
 cd fuse-energy-ha/custom_components/fuse_energy
+pip install aiohttp
 python3 tests/test_fuse.py
 ```
+
+If you already have Home Assistant installed, `aiohttp` came with it.
 
 It prints one line per case and exits non-zero on failure. The same suite runs
 in CI on every push and pull request, alongside Home Assistant's `hassfest` and

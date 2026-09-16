@@ -1,3 +1,12 @@
+<div align="center">
+
+<!-- The dark variant is served to readers using GitHub's dark theme, which is
+     the default -- the wordmark is near-black and would otherwise vanish. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brands/fuse_energy/dark_logo.png">
+  <img src="brands/fuse_energy/logo.png" alt="Fuse Energy for Home Assistant" width="380">
+</picture>
+
 # Fuse Energy for Home Assistant
 
 [![HACS: custom](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz/)
@@ -6,6 +15,8 @@
 [![Release](https://img.shields.io/github/v/release/yakupafsin/fuse-energy-ha?display_name=tag&sort=semver)](https://github.com/yakupafsin/fuse-energy-ha/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-41BDF5)
+
+</div>
 
 Pulls hourly electricity, gas and export readings from
 [Fuse Energy](https://www.fuseenergy.com/) (UK) into Home Assistant's Energy
@@ -40,7 +51,16 @@ cards and automations.
 
 ### HACS (recommended)
 
-This is not yet in the HACS default list, so add it as a custom repository:
+This is not yet in the HACS default list, so it is added as a custom repository.
+If you have [My Home Assistant](https://my.home-assistant.io/) set up, one click
+does it:
+
+[![Open HACS repository on your Home Assistant instance.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=yakupafsin&repository=fuse-energy-ha&category=integration)
+
+Then **Download**, and **restart Home Assistant**.
+
+<details>
+<summary>Or add it by hand</summary>
 
 1. Open **HACS** → **Integrations**.
 2. Top-right menu (⋮) → **Custom repositories**.
@@ -48,6 +68,8 @@ This is not yet in the HACS default list, so add it as a custom repository:
    **Integration**. Click **Add**.
 4. Search HACS for **Fuse Energy** and click **Download**.
 5. **Restart Home Assistant.**
+
+</details>
 
 ### Manual
 
@@ -58,10 +80,13 @@ This is not yet in the HACS default list, so add it as a custom repository:
 
 ## Setup
 
-1. **Settings → Devices & Services → Add Integration → Fuse Energy**.
-2. Enter the mobile number on your Fuse account, in international format
-   (`+447700900123`), then the code Fuse texts you. Fuse sometimes asks a couple
-   of identity questions on top; the form adapts to whatever it asks.
+[![Add integration to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=fuse_energy)
+
+Or: **Settings → Devices & Services → Add Integration → Fuse Energy**.
+
+Then enter the mobile number on your Fuse account, in international format
+(`+447700900123`), followed by the code Fuse texts you. Fuse sometimes asks a
+couple of identity questions on top; the form adapts to whatever it asks.
 
 Nothing appears for up to an hour after setup. Fuse publishes consumption on a
 delay, and the integration deliberately refuses to import an hour until it has
@@ -132,11 +157,14 @@ The parsing, DST and statistics logic runs without Home Assistant installed:
 
 ```sh
 cd custom_components/fuse_energy
+pip install aiohttp
 python3 tests/test_fuse.py
 ```
 
-28 cases, no dependencies. They run in CI on every push and pull request,
-alongside `hassfest` and HACS validation.
+28 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
+against the real client — if you already have HA installed, it came with it.
+They run in CI on every push and pull request, alongside `hassfest` and HACS
+validation.
 
 ## Prior art
 

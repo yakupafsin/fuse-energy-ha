@@ -23,16 +23,29 @@ variant — the orange field reads on both.
 
 ## Regenerating
 
-Do not edit these by hand. Drop in new artwork — a landscape lockup with the
-square mark on the left and the wordmark to the right, transparent background —
-and run:
+Do not edit the files above by hand — they are resized from the artwork in
+`brands/src/`:
+
+| Source | Used for |
+| --- | --- |
+| `src/mark.png` | `icon.png`, `icon@2x.png` — square, transparent |
+| `src/lockup.png` | `logo.png`, `logo@2x.png` — landscape mark + wordmark |
+| `src/lockup-dark.png` | `dark_logo.png`, `dark_logo@2x.png` |
 
 ```sh
-python3 brands/make_assets.py path/to/lockup.png
+python3 brands/make_assets.py
 ```
 
-Every file above is derived from that one source, so the sizes stay correct and
-the icon and logo cannot drift apart. Requires Pillow.
+Requires Pillow. The script only resizes: it does no cropping, colour detection
+or recolouring, so replacing the artwork is a matter of dropping in new source
+files at whatever resolution you have. An earlier version derived all six
+outputs from a single flattened lockup by finding the mark by colour — that
+worked for exactly one image and would have silently mis-cropped a redraw at a
+different scale or hue.
+
+`src/lockup-dark.png` was produced from `src/lockup.png` by lightening the
+wordmark, and is kept as a source rather than regenerated so that a hand-authored
+dark variant can simply replace it.
 
 ## Submitting upstream
 
