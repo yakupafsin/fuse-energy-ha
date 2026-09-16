@@ -203,6 +203,7 @@ def _parse_chart(payload: dict[str, Any], day: date) -> list[Bar]:
     the day we asked for.
     """
     bars: list[Bar] = []
+    lossy_hours = 0
 
     for supply in payload.get("supplies") or ():
         if not isinstance(supply, dict):
@@ -232,7 +233,15 @@ def _parse_chart(payload: dict[str, Any], day: date) -> list[Bar]:
                 continue
 
             kwh = _as_decimal(bar.get("kWh", bar.get("kwh")))
-            cost = _hour_cost(entry, bar)
+            cost = _breakdown_total(entry)
+            if cost is None:
+                # The 2dp field understates by ~10%, so falling back to it is a
+                # regression -- but dropping the bar would leave a hole in the
+                # Energy dashboard and break the running sum. Take the lossy
+                # value and count it, so a Fuse change that removes the
+                # breakdown is visible rather than silent.
+                lossy_hours += 1
+                cost = _as_decimal((bar.get("money") or {}).get("amount"))
             if kwh is None or cost is None:
                 continue
 
@@ -256,6 +265,17 @@ def _parse_chart(payload: dict[str, Any], day: date) -> list[Bar]:
                     is_realised=bar.get("type") == "REALISED",
                 )
             )
+
+    if lossy_hours:
+        # Once per parse, not once per bar: this signals a payload change
+        # affecting the whole response, and there can be 48 of them.
+        _LOGGER.debug(
+            "%s of %s hours on %s had no cost breakdown; used the rounded "
+            "figure, which understates cost",
+            lossy_hours,
+            lossy_hours + len(bars),
+            day,
+        )
 
     bars.sort(key=lambda item: (item.supply_type, item.start))
     return bars
@@ -297,39 +317,34 @@ def _parse_iso(value: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=_LOCAL_TZ)
 
 
-def _hour_cost(entry: dict[str, Any], bar: dict[str, Any]) -> Decimal | None:
-    """The cost of one hour, in pounds, at the best precision Fuse offers.
+def _breakdown_total(entry: dict[str, Any]) -> Decimal | None:
+    """Sum an hour's cost components, or None if it carries no usable ones.
 
-    Each hour arrives with two figures: ``bar.money.amount`` at 2dp, and a
-    ``breakdown`` of components (USAGE, STANDING, ...) at 4dp. They disagree,
-    because ``money.amount`` is the breakdown TRUNCATED to the penny -- verified
-    against a full day, where it matched truncation 48/48 bars and nearest-penny
-    rounding only 12/48.
-
-    Truncating loses value every hour rather than averaging out, so summing the
-    2dp field understates the day. On 2026-09-15 it gave GBP 2.38 electricity
-    and GBP 0.72 gas, against GBP 2.50 and GBP 0.93 in the Fuse app; the
-    components reproduce the app exactly, and match the API's own
-    ``total_money`` for the day. Gas suffers worst, losing up to 0.87p on a 3p
-    hour.
+    Fuse states each hour's cost twice: ``bar.money.amount`` rounded to the
+    penny, and a ``breakdown`` of components (USAGE, STANDING, ...) at 4dp. The
+    2dp figure is the breakdown TRUNCATED rather than rounded to nearest, so
+    summing it loses value every hour instead of averaging out -- about 10% of
+    a bill. Measured 2026-09-15: 48/48 bars matched truncation and 12/48
+    nearest-penny; the components reproduced the Fuse app exactly where the 2dp
+    field did not.
 
     Every component is summed, not just USAGE and STANDING, so a tariff that
-    adds one (a discount, a levy) stays correct without a code change.
-    ``money.amount`` remains the fallback for any hour with no usable
-    breakdown.
+    adds one (a levy, a discount) stays correct without a code change.
+
+    None means "nothing usable here", which is distinct from a genuine zero-cost
+    hour -- only the former should fall back to the lossy field.
+
+    The ``kWh`` figures were checked the same way and are consistent: bar and
+    components agreed on all 48 bars, so energy needs no equivalent treatment.
     """
     components = entry.get("breakdown")
-    if isinstance(components, list):
-        total: Decimal | None = None
-        for component in components:
-            if not isinstance(component, dict):
-                continue
-            amount = _as_decimal((component.get("value") or {}).get("amount"))
-            if amount is not None:
-                total = amount if total is None else total + amount
-        if total is not None:
-            return total
-    return _as_decimal((bar.get("money") or {}).get("amount"))
+    amounts = [
+        amount
+        for component in (components if isinstance(components, list) else ())
+        if isinstance(component, dict)
+        if (amount := _as_decimal((component.get("value") or {}).get("amount"))) is not None
+    ]
+    return sum(amounts, Decimal(0)) if amounts else None
 
 
 def _as_decimal(value: Any) -> Decimal | None:
