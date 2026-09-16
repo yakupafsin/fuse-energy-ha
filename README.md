@@ -132,11 +132,14 @@ The parsing, DST and statistics logic runs without Home Assistant installed:
 
 ```sh
 cd custom_components/fuse_energy
+pip install aiohttp
 python3 tests/test_fuse.py
 ```
 
-28 cases, no dependencies. They run in CI on every push and pull request,
-alongside `hassfest` and HACS validation.
+28 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
+against the real client — if you already have HA installed, it came with it.
+They run in CI on every push and pull request, alongside `hassfest` and HACS
+validation.
 
 ## Prior art
 

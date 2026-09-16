@@ -21,6 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # The only install. Home Assistant itself is stubbed (see tests/hastubs.py)
+      # because it is heavyweight; aiohttp is a plain package and the integration
+      # imports it at module scope, so CI runs against the real one.
+      - run: pip install aiohttp
       - name: Run test suite
         working-directory: custom_components/fuse_energy
         run: python3 tests/test_fuse.py
