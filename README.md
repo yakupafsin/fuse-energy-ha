@@ -1,3 +1,12 @@
+<div align="center">
+
+<!-- The dark variant is served to readers using GitHub's dark theme, which is
+     the default -- the wordmark is near-black and would otherwise vanish. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brands/fuse_energy/dark_logo.png">
+  <img src="brands/fuse_energy/logo.png" alt="Fuse Energy for Home Assistant" width="380">
+</picture>
+
 # Fuse Energy for Home Assistant
 
 [![HACS: custom](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz/)
@@ -6,6 +15,8 @@
 [![Release](https://img.shields.io/github/v/release/yakupafsin/fuse-energy-ha?display_name=tag&sort=semver)](https://github.com/yakupafsin/fuse-energy-ha/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.9%2B-41BDF5)
+
+</div>
 
 Pulls hourly electricity, gas and export readings from
 [Fuse Energy](https://www.fuseenergy.com/) (UK) into Home Assistant's Energy
