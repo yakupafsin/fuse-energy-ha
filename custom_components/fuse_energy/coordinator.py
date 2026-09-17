@@ -167,12 +167,7 @@ class FuseCoordinator(DataUpdateCoordinator[FuseData]):
 
 
 def _settled(bars: list[Bar], now: datetime) -> list[Bar]:
-    """Bars whose hour has fully elapsed.
-
-    The one gate between Fuse's still-climbing current hour and long-term
-    statistics, so it is a named function with its own tests rather than a
-    comprehension buried in the poll.
-    """
+    """Bars whose hour has fully elapsed -- the only ones statistics may see."""
     return [bar for bar in bars if bar.end <= now]
 
 
@@ -215,20 +210,17 @@ def _summarise(
     for supply_type, supply_bars in by_supply.items():
         supply_bars.sort(key=lambda item: item.start)
         latest = supply_bars[-1] if supply_bars else None
-        todays = [
-            bar
-            for bar in supply_bars
-            if bar.start.astimezone(_LOCAL_TZ).date() == today
-        ]
         live = current.get(supply_type)
         # A completed hour is never smaller than the partial reading it
-        # replaces, so when the hour closes its settled bar simply lands in
-        # ``todays`` in place of this one and the running total does not jump
-        # backwards. ``_settled`` and ``_in_progress`` are disjoint, so the
-        # hour cannot be counted twice on the way through.
-        if live is not None and live.start.astimezone(_LOCAL_TZ).date() == today:
-            todays = [*todays, live]
-
+        # replaces, so when the hour closes its settled bar takes this one's
+        # place here and the running total does not jump backwards. ``_settled``
+        # and ``_in_progress`` are disjoint, so the hour is never counted twice.
+        candidates = supply_bars if live is None else [*supply_bars, live]
+        todays = [
+            bar
+            for bar in candidates
+            if bar.start.astimezone(_LOCAL_TZ).date() == today
+        ]
         snapshots[supply_type] = SupplySnapshot(
             supply_type=supply_type,
             last_hour_start=latest.start if latest else None,

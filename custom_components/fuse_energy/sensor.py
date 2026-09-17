@@ -54,24 +54,15 @@ def _label(supply_type: str) -> str:
     return _SUPPLY_LABELS.get(supply_type, supply_type.replace("_", " ").capitalize())
 
 
-def _last_hour_start(snapshot: SupplySnapshot) -> datetime | None:
-    return snapshot.last_hour_start
-
-
-def _current_hour_start(snapshot: SupplySnapshot) -> datetime | None:
-    return snapshot.current_hour_start
-
-
 @dataclass(frozen=True, kw_only=True)
 class FuseSensorDescription(SensorEntityDescription):
     """A sensor description plus how to read its value off a snapshot."""
 
     value_fn: Callable[[SupplySnapshot], float | None]
-    # Which hour the reading covers, and the attribute name to publish it
-    # under. Per-description so the current-hour entities do not advertise a
-    # "last_hour_start" that has nothing to do with their value.
-    period_attr: str = "last_hour_start"
-    period_fn: Callable[[SupplySnapshot], datetime | None] = _last_hour_start
+    # The snapshot field naming the hour this reading covers, published as an
+    # attribute under that same name. None for readings that span no single
+    # hour, so a daily total does not advertise an hour that does not bound it.
+    period_attr: str | None = "last_hour_start"
     # Daily totals restart at local midnight. Home Assistant needs to be told
     # so it treats the drop as a reset rather than a meter running backwards.
     resets_daily: bool = False
@@ -102,7 +93,6 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
         icon="mdi:flash-outline",
         value_fn=lambda snapshot: snapshot.current_hour_kwh,
         period_attr="current_hour_start",
-        period_fn=_current_hour_start,
     ),
     FuseSensorDescription(
         key="current_hour_cost",
@@ -112,7 +102,6 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
         icon="mdi:currency-gbp",
         value_fn=lambda snapshot: snapshot.current_hour_cost,
         period_attr="current_hour_start",
-        period_fn=_current_hour_start,
     ),
     # "Today so far": these count the hour Fuse is still metering, so they
     # track the Fuse app rather than trailing it. They are display entities --
@@ -121,6 +110,7 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
     FuseSensorDescription(
         key="today_energy",
         name="today",
+        period_attr=None,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -131,6 +121,7 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
     FuseSensorDescription(
         key="today_cost",
         name="today cost",
+        period_attr=None,
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=_CURRENCY,
@@ -211,9 +202,7 @@ class FuseSensor(CoordinatorEntity[FuseCoordinator], SensorEntity):
         entities drop out while Fuse still calls the hour FORECASTED instead
         of reporting a zero that reads as "you used nothing".
         """
-        if not super().available or (snapshot := self._snapshot) is None:
-            return False
-        return self.entity_description.value_fn(snapshot) is not None
+        return super().available and self.native_value is not None
 
     @property
     def native_value(self) -> float | None:
@@ -235,14 +224,16 @@ class FuseSensor(CoordinatorEntity[FuseCoordinator], SensorEntity):
 
         Fuse runs an hour or more behind, so without this it is impossible to
         tell a genuinely idle hour from a reading that has simply not caught up.
+        The daily totals span no single hour and so carry no such attribute.
         """
         if (snapshot := self._snapshot) is None:
             return None
-        if (start := self.entity_description.period_fn(snapshot)) is None:
+        if (attr := self.entity_description.period_attr) is None:
+            return {"supply_type": self._supply_type}
+        start: datetime | None = getattr(snapshot, attr)
+        if start is None:
             return None
         return {
-            self.entity_description.period_attr: start.astimezone(
-                _LOCAL_TZ
-            ).isoformat(),
+            attr: start.astimezone(_LOCAL_TZ).isoformat(),
             "supply_type": self._supply_type,
         }

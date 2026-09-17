@@ -265,10 +265,7 @@ check("current hour not the last hour", snap.last_hour_kwh, 3.0)
 # Closing the hour must not double-count it: the settled bar replaces the
 # partial one rather than adding to it. _settled and _in_progress are disjoint,
 # so the same hour can never arrive down both paths at once.
-closed = make_bars([1, 2, 3]) + [Bar(supply_type="ELEC_IMPORT",
-                                     start=datetime(2026, 1, 15, 12, tzinfo=UTC),
-                                     kwh=Decimal("0.9"), cost_gbp=Decimal("0.10"),
-                                     is_realised=True)]
+closed = make_bars([1, 2, 3]) + [live_bar("0.9")]
 check("closed hour counted once",
       round(_summarise(closed, [], today)["ELEC_IMPORT"].today_kwh, 6), 6.9)
 
@@ -554,6 +551,12 @@ check("current hour names its own hour",
       entity("current_hour_energy", metered).extra_state_attributes,
       {"current_hour_start": "2026-01-15T12:00:00+00:00",
        "supply_type": "ELEC_IMPORT"})
+# A daily total spans no single hour, so it names none -- before this it
+# inherited "last_hour_start", which stopped bounding the value once the open
+# hour was counted in.
+check("today advertises no hour",
+      entity("today_energy", metered).extra_state_attributes,
+      {"supply_type": "ELEC_IMPORT"})
 check("last hour keeps its existing attribute",
       entity("last_hour_energy", metered).extra_state_attributes,
       {"last_hour_start": "2026-01-15T11:00:00+00:00",
