@@ -2,8 +2,14 @@
 
 The Energy dashboard is fed by long-term statistics, not by these entities --
 see ``statistics.py``. What lives here is the at-a-glance layer: what the
-last settled hour cost, and how the day is adding up, in a form you can put
-on a card or trigger an automation from.
+last settled hour cost, how the day is adding up, and -- from the hour Fuse
+is still metering -- roughly what the Fuse app is showing right now, in a form
+you can put on a card or trigger an automation from.
+
+None of these carry a ``state_class``, so none of them reach long-term
+statistics. That is deliberate: the current-hour figures climb during the hour
+and Fuse revises them afterwards, so recording them would fight the settled
+values ``statistics.py`` writes for the very same hour.
 
 Entities are created per supply discovered on the account, so a property with
 gas and solar export gets a full set for each without any configuration.
@@ -53,6 +59,10 @@ class FuseSensorDescription(SensorEntityDescription):
     """A sensor description plus how to read its value off a snapshot."""
 
     value_fn: Callable[[SupplySnapshot], float | None]
+    # The snapshot field naming the hour this reading covers, published as an
+    # attribute under that same name. None for readings that span no single
+    # hour, so a daily total does not advertise an hour that does not bound it.
+    period_attr: str | None = "last_hour_start"
     # Daily totals restart at local midnight. Home Assistant needs to be told
     # so it treats the drop as a reset rather than a meter running backwards.
     resets_daily: bool = False
@@ -76,8 +86,31 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
         value_fn=lambda snapshot: snapshot.last_hour_cost,
     ),
     FuseSensorDescription(
+        key="current_hour_energy",
+        name="current hour",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        suggested_display_precision=3,
+        icon="mdi:flash-outline",
+        value_fn=lambda snapshot: snapshot.current_hour_kwh,
+        period_attr="current_hour_start",
+    ),
+    FuseSensorDescription(
+        key="current_hour_cost",
+        name="current hour cost",
+        native_unit_of_measurement=_CURRENCY,
+        suggested_display_precision=2,
+        icon="mdi:currency-gbp",
+        value_fn=lambda snapshot: snapshot.current_hour_cost,
+        period_attr="current_hour_start",
+    ),
+    # "Today so far": these count the hour Fuse is still metering, so they
+    # track the Fuse app rather than trailing it. They are display entities --
+    # the Energy dashboard reads the external statistics in statistics.py,
+    # which are written from settled hours only.
+    FuseSensorDescription(
         key="today_energy",
         name="today",
+        period_attr=None,
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -88,6 +121,7 @@ SENSORS: tuple[FuseSensorDescription, ...] = (
     FuseSensorDescription(
         key="today_cost",
         name="today cost",
+        period_attr=None,
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=_CURRENCY,
@@ -162,8 +196,13 @@ class FuseSensor(CoordinatorEntity[FuseCoordinator], SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Unavailable until Fuse has published a settled hour for this supply."""
-        return super().available and self._snapshot is not None
+        """Available once Fuse has published a value for this reading.
+
+        Judged per reading rather than per supply, so the current-hour
+        entities drop out while Fuse still calls the hour FORECASTED instead
+        of reporting a zero that reads as "you used nothing".
+        """
+        return super().available and self.native_value is not None
 
     @property
     def native_value(self) -> float | None:
@@ -185,12 +224,16 @@ class FuseSensor(CoordinatorEntity[FuseCoordinator], SensorEntity):
 
         Fuse runs an hour or more behind, so without this it is impossible to
         tell a genuinely idle hour from a reading that has simply not caught up.
+        The daily totals span no single hour and so carry no such attribute.
         """
-        if (snapshot := self._snapshot) is None or snapshot.last_hour_start is None:
+        if (snapshot := self._snapshot) is None:
+            return None
+        if (attr := self.entity_description.period_attr) is None:
+            return {"supply_type": self._supply_type}
+        start: datetime | None = getattr(snapshot, attr)
+        if start is None:
             return None
         return {
-            "last_hour_start": snapshot.last_hour_start.astimezone(
-                _LOCAL_TZ
-            ).isoformat(),
+            attr: start.astimezone(_LOCAL_TZ).isoformat(),
             "supply_type": self._supply_type,
         }

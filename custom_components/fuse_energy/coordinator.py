@@ -48,6 +48,13 @@ class SupplySnapshot:
     last_hour_cost: float | None = None
     today_kwh: float = 0.0
     today_cost: float = 0.0
+    # The hour currently in progress. Fuse publishes it as REALISED with a
+    # value that climbs as the meter reports, so it is kept out of statistics
+    # -- but it IS counted in the daily totals below, which is what keeps them
+    # level with the Fuse app instead of trailing it by up to an hour.
+    current_hour_start: datetime | None = None
+    current_hour_kwh: float | None = None
+    current_hour_cost: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +115,11 @@ class FuseCoordinator(DataUpdateCoordinator[FuseData]):
         # Fuse reports the hour in progress as though it were settled, with a
         # value that keeps climbing. Writing it would put a misleadingly small
         # bar on the dashboard, so only fully elapsed hours are imported.
-        elapsed = [bar for bar in bars if bar.end <= now]
+        elapsed = _settled(bars, now)
+
+        # That same unsettled bar is still worth showing: it is most of why the
+        # Fuse app looks ahead of Home Assistant. It reaches the sensors only.
+        in_progress = _in_progress(bars, now)
 
         if elapsed:
             # One call for the whole range: the writer chains each series'
@@ -120,7 +131,7 @@ class FuseCoordinator(DataUpdateCoordinator[FuseData]):
 
         return FuseData(
             premises_id=self.premises_id,
-            supplies=_summarise(elapsed, today),
+            supplies=_summarise(elapsed, in_progress, today),
         )
 
     async def _async_resume_from(self, supply_types: set[str], today: date) -> date:
@@ -155,30 +166,71 @@ class FuseCoordinator(DataUpdateCoordinator[FuseData]):
         return start.astimezone(_LOCAL_TZ).date()
 
 
-def _summarise(bars: list[Bar], today: date) -> dict[str, SupplySnapshot]:
-    """Reduce settled bars to per-supply sensor values."""
+def _settled(bars: list[Bar], now: datetime) -> list[Bar]:
+    """Bars whose hour has fully elapsed -- the only ones statistics may see."""
+    return [bar for bar in bars if bar.end <= now]
+
+
+def _in_progress(bars: list[Bar], now: datetime) -> list[Bar]:
+    """Bars covering ``now`` -- the hour Fuse is still metering, at most one
+    per supply."""
+    return [bar for bar in bars if bar.start <= now < bar.end]
+
+
+def _summarise(
+    settled: list[Bar], in_progress: list[Bar], today: date
+) -> dict[str, SupplySnapshot]:
+    """Reduce bars to per-supply sensor values.
+
+    ``settled`` drives the last-hour figures. ``in_progress`` supplies the
+    current-hour fields and is also counted into the daily totals, so "today"
+    means today so far -- the same thing the Fuse app shows -- rather than
+    today up to the last hour that closed.
+
+    Long-term statistics are unaffected: they are written from ``settled``
+    alone, in :func:`_async_poll`, and never see the unfinished hour.
+    """
     snapshots: dict[str, SupplySnapshot] = {}
 
     by_supply: dict[str, list[Bar]] = {}
-    for bar in bars:
+    for bar in settled:
         if bar.is_realised:
             by_supply.setdefault(bar.supply_type, []).append(bar)
 
+    # Fuse marks an hour it has no readings for yet as FORECASTED, so an
+    # unrealised bar is a prediction rather than a partial measurement and is
+    # dropped. A supply whose first bar of the day is the one in progress has
+    # nothing in ``settled``, so seed an entry for it here too.
+    current: dict[str, Bar] = {}
+    for bar in in_progress:
+        if bar.is_realised:
+            current[bar.supply_type] = bar
+            by_supply.setdefault(bar.supply_type, [])
+
     for supply_type, supply_bars in by_supply.items():
         supply_bars.sort(key=lambda item: item.start)
-        latest = supply_bars[-1]
+        latest = supply_bars[-1] if supply_bars else None
+        live = current.get(supply_type)
+        # A completed hour is never smaller than the partial reading it
+        # replaces, so when the hour closes its settled bar takes this one's
+        # place here and the running total does not jump backwards. ``_settled``
+        # and ``_in_progress`` are disjoint, so the hour is never counted twice.
+        candidates = supply_bars if live is None else [*supply_bars, live]
         todays = [
             bar
-            for bar in supply_bars
+            for bar in candidates
             if bar.start.astimezone(_LOCAL_TZ).date() == today
         ]
         snapshots[supply_type] = SupplySnapshot(
             supply_type=supply_type,
-            last_hour_start=latest.start,
-            last_hour_kwh=float(latest.kwh),
-            last_hour_cost=float(latest.cost_gbp),
+            last_hour_start=latest.start if latest else None,
+            last_hour_kwh=float(latest.kwh) if latest else None,
+            last_hour_cost=float(latest.cost_gbp) if latest else None,
             today_kwh=float(sum(bar.kwh for bar in todays)),
             today_cost=float(sum(bar.cost_gbp for bar in todays)),
+            current_hour_start=live.start if live else None,
+            current_hour_kwh=float(live.kwh) if live else None,
+            current_hour_cost=float(live.cost_gbp) if live else None,
         )
 
     return snapshots

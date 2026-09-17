@@ -40,6 +40,13 @@ async def async_get_config_entry_diagnostics(
                 ),
                 "last_hour_kwh": snapshot.last_hour_kwh,
                 "last_hour_cost": snapshot.last_hour_cost,
+                "current_hour_start": (
+                    snapshot.current_hour_start.isoformat()
+                    if snapshot.current_hour_start
+                    else None
+                ),
+                "current_hour_kwh": snapshot.current_hour_kwh,
+                "current_hour_cost": snapshot.current_hour_cost,
                 "today_kwh": snapshot.today_kwh,
                 "today_cost": snapshot.today_cost,
                 "statistic_ids": [

@@ -23,7 +23,13 @@ import hastubs  # noqa: F401  (installs the stub modules)
 sys.path.insert(0, str(_CUSTOM_COMPONENTS))
 
 from fuse_energy.api import Bar, _parse_chart  # noqa: E402
-from fuse_energy.coordinator import _summarise  # noqa: E402
+from fuse_energy import sensor as fuse_sensor  # noqa: E402
+from fuse_energy.coordinator import (  # noqa: E402
+    FuseData,
+    _in_progress,
+    _settled,
+    _summarise,
+)
 from fuse_energy import statistics as fuse_stats  # noqa: E402
 from fuse_energy.auth import (  # noqa: E402
     FuseAuthError,
@@ -231,10 +237,68 @@ check("gas series ids", sorted(written),
 
 # --- 16. Snapshot summary ----------------------------------------------------
 today = date(2026, 1, 15)
-snap = _summarise(make_bars([1, 2, 3]), today)["ELEC_IMPORT"]
+snap = _summarise(make_bars([1, 2, 3]), [], today)["ELEC_IMPORT"]
 check("snapshot today total", round(snap.today_kwh, 6), 6.0)
 check("snapshot last hour", snap.last_hour_kwh, 3.0)
 check("snapshot last hour time", iso(snap.last_hour_start), "2026-01-15T11:00Z")
+check("no current hour without one", snap.current_hour_kwh, None)
+
+
+# --- 16b. The hour still being metered ---------------------------------------
+def live_bar(kwh, supply="ELEC_IMPORT", realised=True):
+    """The bar covering 12:00, i.e. the hour in progress in these fixtures."""
+    return Bar(supply_type=supply, start=datetime(2026, 1, 15, 12, tzinfo=UTC),
+               kwh=Decimal(str(kwh)), cost_gbp=Decimal("0.05"),
+               is_realised=realised)
+
+
+snap = _summarise(make_bars([1, 2, 3]), [live_bar("0.4")], today)["ELEC_IMPORT"]
+check("current hour value", snap.current_hour_kwh, 0.4)
+check("current hour cost", snap.current_hour_cost, 0.05)
+check("current hour time", iso(snap.current_hour_start), "2026-01-15T12:00Z")
+# "Today so far" counts it, which is what keeps the figure level with the
+# Fuse app; the settled last-hour reading is left alone.
+check("current hour counted in today", round(snap.today_kwh, 6), 6.4)
+check("current hour cost counted in today", round(snap.today_cost, 6), 0.35)
+check("current hour not the last hour", snap.last_hour_kwh, 3.0)
+
+# Closing the hour must not double-count it: the settled bar replaces the
+# partial one rather than adding to it. _settled and _in_progress are disjoint,
+# so the same hour can never arrive down both paths at once.
+closed = make_bars([1, 2, 3]) + [live_bar("0.9")]
+check("closed hour counted once",
+      round(_summarise(closed, [], today)["ELEC_IMPORT"].today_kwh, 6), 6.9)
+
+# FORECASTED means Fuse has no readings for the hour yet, so there is nothing
+# to show -- a prediction rendered as a live figure would be worse than blank.
+snap = _summarise(
+    make_bars([1, 2, 3]), [live_bar("0.4", realised=False)], today
+)["ELEC_IMPORT"]
+check("forecast hour is not current", snap.current_hour_kwh, None)
+
+# A supply whose first bar of the day is the one in progress still gets a
+# snapshot, otherwise its entities would stay unavailable until 01:00.
+snaps = _summarise([], [live_bar("0.4", supply="GAS")], today)
+check("in-progress-only supply appears", sorted(snaps), ["GAS"])
+check("in-progress-only current hour", snaps["GAS"].current_hour_kwh, 0.4)
+check("in-progress-only has no last hour", snaps["GAS"].last_hour_kwh, None)
+check("in-progress-only today counts it", snaps["GAS"].today_kwh, 0.4)
+
+# --- 16c. Only elapsed hours are eligible for statistics ---------------------
+# make_bars covers 09:00, 10:00 and 11:00; at 11:30 the 11:00 hour is still
+# being metered, so statistics may see the first two and no more.
+_bars = make_bars([1, 2, 3])
+_now = datetime(2026, 1, 15, 11, 30, tzinfo=UTC)
+check("in-progress hour withheld from statistics",
+      [iso(b.start) for b in _settled(_bars, _now)],
+      ["2026-01-15T09:00Z", "2026-01-15T10:00Z"])
+check("in-progress hour identified",
+      [iso(b.start) for b in _in_progress(_bars, _now)], ["2026-01-15T11:00Z"])
+# On the hour boundary the hour that just closed is settled, not in progress.
+_now = datetime(2026, 1, 15, 12, 0, tzinfo=UTC)
+check("closed hour settles exactly on the boundary",
+      len(_settled(_bars, _now)), 3)
+check("nothing in progress on the boundary", _in_progress(_bars, _now), [])
 
 # --- 17. Hourly cost comes from the 4dp breakdown, not the 2dp rounded field --
 # The fixture values are one real hour from 2026-09-15; see _breakdown_total for
@@ -433,6 +497,70 @@ for _name in ("strings.json", "translations/en.json"):
     )
     check(f"every error key is translated in {_name}", sorted(used - _declared), [])
     check(f"no unused error key in {_name}", sorted(_declared - used), [])
+
+# --- 21. Sensor layer: what the entities actually publish --------------------
+check("every reading has a sensor", sorted(d.key for d in fuse_sensor.SENSORS),
+      ["current_hour_cost", "current_hour_energy", "last_hour_cost",
+       "last_hour_energy", "today_cost", "today_energy"])
+
+# The current-hour figures climb through the hour and Fuse revises them after
+# it closes, so they must never be recorded as long-term statistics: that is
+# statistics.py's job, from the settled bar, for the very same hour. A
+# state_class here would have the two fighting over the same hour.
+check("current-hour sensors are never recorded",
+      [d.state_class for d in fuse_sensor.SENSORS
+       if d.key.startswith("current_hour")], [None, None])
+
+
+class _Coord:
+    """Just enough coordinator for an entity to read itself off."""
+
+    premises_id = "prem-1"
+
+    def __init__(self, snapshot, ok=True):
+        self.last_update_success = ok
+        self.data = FuseData(premises_id="prem-1",
+                             supplies={"ELEC_IMPORT": snapshot} if snapshot else {})
+
+
+def entity(key, snapshot, ok=True):
+    description = next(d for d in fuse_sensor.SENSORS if d.key == key)
+    return fuse_sensor.FuseSensor(_Coord(snapshot, ok), "ELEC_IMPORT", description)
+
+
+metered = _summarise(make_bars([1, 2, 3]), [live_bar("0.4")], today)["ELEC_IMPORT"]
+settled_only = _summarise(make_bars([1, 2, 3]), [], today)["ELEC_IMPORT"]
+
+check("current hour reported", entity("current_hour_energy", metered).native_value, 0.4)
+check("current hour cost reported",
+      entity("current_hour_cost", metered).native_value, 0.05)
+check("current hour available", entity("current_hour_energy", metered).available, True)
+# Fuse has not realised the hour: blank, rather than a zero that reads as
+# "you used nothing this hour".
+check("current hour unavailable while unknown",
+      entity("current_hour_energy", settled_only).available, False)
+check("settled readings unaffected",
+      entity("last_hour_energy", settled_only).available, True)
+check("a failed poll takes the entity down",
+      entity("current_hour_energy", metered, ok=False).available, False)
+check("current hour is named for the user",
+      entity("current_hour_energy", metered)._attr_name, "Electricity current hour")
+
+# Each entity timestamps the hour it actually describes.
+check("current hour names its own hour",
+      entity("current_hour_energy", metered).extra_state_attributes,
+      {"current_hour_start": "2026-01-15T12:00:00+00:00",
+       "supply_type": "ELEC_IMPORT"})
+# A daily total spans no single hour, so it names none -- before this it
+# inherited "last_hour_start", which stopped bounding the value once the open
+# hour was counted in.
+check("today advertises no hour",
+      entity("today_energy", metered).extra_state_attributes,
+      {"supply_type": "ELEC_IMPORT"})
+check("last hour keeps its existing attribute",
+      entity("last_hour_energy", metered).extra_state_attributes,
+      {"last_hour_start": "2026-01-15T11:00:00+00:00",
+       "supply_type": "ELEC_IMPORT"})
 
 # --- report ------------------------------------------------------------------
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed\n")
