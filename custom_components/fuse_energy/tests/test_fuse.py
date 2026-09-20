@@ -36,6 +36,7 @@ from fuse_energy.auth import (  # noqa: E402
     FuseAuthFlow,
     FuseAuthTransient,
     FuseSmsNotSent,
+    normalise_date_answer,
 )
 from fuse_energy.const import WEB_APP_VERSION  # noqa: E402
 from homeassistant.components.recorder import statistics as stat_stub  # noqa: E402
@@ -497,6 +498,54 @@ for _name in ("strings.json", "translations/en.json"):
     )
     check(f"every error key is translated in {_name}", sorted(used - _declared), [])
     check(f"no unused error key in {_name}", sorted(_declared - used), [])
+
+# --- date of birth entry (#14) -----------------------------------------------
+# Fuse asks for a date of birth as an ADDITIONAL_INFO question. It used to
+# render as DateSelector, whose calendar opens on the current month with no way
+# to jump a year, so entering a 1960s birthday meant paging back one month at a
+# time. The field is now a native date input, which can be typed into.
+
+for _raw, _want in (
+    ("1965-03-04", "1965-03-04"),   # what a native date input submits
+    ("  1965-03-04  ", "1965-03-04"),
+    ("04/03/1965", "1965-03-04"),   # day-first, as typed in a degraded text box
+    ("04-03-1965", "1965-03-04"),
+    ("4.3.1965", "1965-03-04"),
+    ("1965/03/04", "1965-03-04"),
+):
+    check(f"date {_raw!r} normalises to {_want}", normalise_date_answer(_raw), _want)
+
+for _bad in ("", "   ", "not a date", "1965-13-45", "03/04", "1965"):
+    check(f"date {_bad!r} is refused", normalise_date_answer(_bad), None)
+
+# Day-first must not be mistaken for ISO: "04-03-1965" is the 4th of March
+# 1965, not the 3rd of April in the year 4.
+check("day-first is not read as a year-4 ISO date",
+      normalise_date_answer("04-03-1965"), "1965-03-04")
+
+# The schema must no longer reach for DateSelector, and must ask for the date
+# variant of the text selector instead.
+_flow_src = (_CUSTOM_COMPONENTS / "fuse_energy" / "config_flow.py").read_text()
+check("DateSelector is no longer called", "selector.DateSelector(" in _flow_src, False)
+check("DATE questions use the date text selector",
+      "TextSelectorType.DATE" in _flow_src, True)
+
+# A bad date must be reported against its own field rather than sent to Fuse.
+_identity_step = next(
+    node for node in ast.walk(_FLOW)
+    if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+    if node.name == "async_step_identity"
+)
+_date_errors = {
+    node.value.value
+    for node in ast.walk(_identity_step)
+    if isinstance(node, ast.Assign)
+    for target in node.targets
+    if isinstance(target, ast.Subscript)
+    if getattr(target.value, "id", None) == "errors"
+    if isinstance(node.value, ast.Constant)
+}
+check("the identity step can refuse a date", "invalid_date" in _date_errors, True)
 
 # --- 21. Sensor layer: what the entities actually publish --------------------
 check("every reading has a sensor", sorted(d.key for d in fuse_sensor.SENSORS),
