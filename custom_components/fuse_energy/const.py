@@ -30,18 +30,14 @@ CONF_PREMISES_ID: str = "premises_id"
 API_BASE_URL: str = "https://api.fuseenergy.com"
 WEB_BASE_URL: str = "https://www.fuseenergy.com"
 
-# Sent as x-fuse-app-version on the web SMS-dispatch call. The endpoint
-# rejects requests that look too old; bump this if OTP delivery starts
-# failing with a version complaint.
-WEB_APP_VERSION: str = "5.314"
+# The website's sign-in call carries this as an x-fuse-app-version header, and
+# Fuse turns away anything it reads as too old -- so if OTP delivery starts
+# failing with a version complaint, this is the thing to bump. Read off the live
+# web app on 20 Sep 2026.
+WEB_APP_VERSION: str = "0.5.388"
 
 # How far back to reach on the very first poll of a new config entry.
 INITIAL_BACKFILL_DAYS: int = 30
-
-# Fuse keeps revising an hour's value for a while after the hour closes, as
-# the meter's readings trickle in. Every poll therefore rewrites this many
-# hours of history rather than trusting what we wrote last time.
-REWRITE_HOURS: int = 24
 
 
 def slugify_id(value: str) -> str:
