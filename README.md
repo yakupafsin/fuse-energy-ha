@@ -1,10 +1,14 @@
 <div align="center">
 
-<!-- The dark variant is served to readers using GitHub's dark theme, which is
-     the default -- the wordmark is near-black and would otherwise vanish. -->
+<!-- Absolute URLs, not repository-relative ones. HACS renders this README
+     inside Home Assistant, where a relative path has nothing to resolve
+     against, and GitHub rewrites a relative `src` on an <img> but not a
+     relative `srcset` on a <source>. The dark variant is served to anyone on
+     a dark theme, the default in both places, because the wordmark is
+     near-black and would otherwise vanish. -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="brands/fuse_energy/dark_logo.png">
-  <img src="brands/fuse_energy/logo.png" alt="Fuse Energy for Home Assistant" width="380">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/yakupafsin/fuse-energy-ha/main/custom_components/fuse_energy/brand/dark_logo.png">
+  <img src="https://raw.githubusercontent.com/yakupafsin/fuse-energy-ha/main/custom_components/fuse_energy/brand/logo.png" alt="Fuse Energy for Home Assistant" width="380">
 </picture>
 
 # Fuse Energy for Home Assistant
