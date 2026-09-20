@@ -1,0 +1,35 @@
+Fuse Energy for Home Assistant
+Copyright (c) 2026 Yakup Afsin
+Licensed under the MIT Licence. See LICENSE.
+
+---
+ATTRIBUTION
+
+Fuse Energy provides no public API. What is known about it was worked out by
+other people first, and this project rests on two pieces of prior research.
+
+    LionZXY/FuseEnergyApi  (December 2024, no licence stated)
+    https://github.com/LionZXY/FuseEnergyApi
+
+A Kotlin client, and the earliest public reverse-engineering of this API that
+we are aware of. It established the API base, the token refresh endpoint and
+its retry-on-401 behaviour, and the customer / property / readings shape. It
+records the OTP issue endpoint but could not complete a sign-in without the
+mobile app, and falls back to intercepting the token from a rooted handset.
+
+    simonsolts/fuse-homeassistant  (AGPL-3.0, May 2026)
+    https://github.com/simonsolts/fuse-homeassistant
+
+Worked out the parts that let an integration authenticate itself and stay
+correct over time: that signing in takes two calls and only the second
+dispatches the SMS, the version header the website expects, the endpoints as
+they now stand, and how the hourly figures settle in the days after they first
+appear.
+
+Both informed this project and the credit for that research is theirs.
+
+This acknowledgement is given because it is deserved, not because a licence
+compels it. No code from either project was copied into this one: both are
+public, and a file-by-file comparison shows no shared implementation. What is
+shared is knowledge about a third party's API -- endpoints, headers and
+protocol behaviour -- which is not itself anyone's to license.

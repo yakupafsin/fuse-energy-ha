@@ -27,6 +27,11 @@ dashboard.
 > Fuse mobile app uses, which can change without notice. Fuse has not endorsed
 > this project.
 
+> [!NOTE]
+> Built on Fuse API research first published in
+> [simonsolts/fuse-homeassistant](https://github.com/simonsolts/fuse-homeassistant)
+> by Simon Solts. See [NOTICE](NOTICE).
+
 ## What it creates
 
 For **every supply on the property** — import, export and gas alike, discovered
@@ -162,18 +167,36 @@ pip install aiohttp
 python3 tests/test_fuse.py
 ```
 
-28 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
+96 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
 against the real client — if you already have HA installed, it came with it.
 They run in CI on every push and pull request, alongside `hassfest` and HACS
 validation.
 
-## Prior art
+## Prior art and credit
+
+Fuse has no public API, and what is known about it was worked out by other
+people first. Both projects below informed this one, and the credit is theirs.
+
+[LionZXY/FuseEnergyApi](https://github.com/LionZXY/FuseEnergyApi) (December
+2024) was first: a Kotlin client that established the API base, the token
+refresh endpoint and its retry-on-401 behaviour, and the customer → property →
+readings shape. It records the OTP issue endpoint, but could not complete a
+sign-in without the mobile app, so the token is intercepted from a rooted
+handset by hand.
 
 [simonsolts/fuse-homeassistant](https://github.com/simonsolts/fuse-homeassistant)
-(AGPL-3.0) and [LionZXY/FuseEnergyApi](https://github.com/LionZXY/FuseEnergyApi)
-independently mapped this API. No code was copied from either; the endpoint
-shapes are theirs to credit.
+(AGPL-3.0, May 2026) worked out the parts that let an integration sign itself
+in and stay correct: that signing in takes two calls and only the second
+dispatches the SMS, the version header the website expects, the endpoints as
+they now stand, and how the hourly figures settle over the days after they
+first appear.
+
+No code was copied from either project. That is checkable rather than merely
+asserted: both repositories are public, and a file-by-file comparison shows no
+shared implementation. What is owed is the protocol research, and it is
+acknowledged here and in [NOTICE](NOTICE).
 
 ## License
 
-[MIT](LICENSE) © Yakup Afsin
+[MIT](LICENSE) © Yakup Afsin. See [NOTICE](NOTICE) for attribution and
+trademark information.
