@@ -28,6 +28,7 @@ from .auth import (
     IdentityQuestion,
     NeedsIdentity,
     Tokens,
+    normalise_date_answer,
 )
 from .const import (
     CONF_ACCESS_TOKEN,
@@ -154,36 +155,62 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
         assert self._auth is not None
 
         if user_input is not None:
-            answers = {
-                question.key: str(user_input[question.key]).strip()
-                for question in self._questions
-                if user_input.get(question.key) is not None
-            }
-            try:
-                result = await self._auth.async_submit_identity(answers)
-            except FuseAuthTransient:
-                errors["base"] = "cannot_connect"
-            except FuseAuthError as err:
-                _LOGGER.debug("Identity answers rejected: %s", err)
-                errors["base"] = "invalid_identity"
-            else:
-                return await self._async_handle_challenge(result)
+            answers: dict[str, str] = {}
+            for question in self._questions:
+                raw = user_input.get(question.key)
+                if raw is None:
+                    continue
+                answer = str(raw).strip()
+                if question.kind == "DATE":
+                    normalised = normalise_date_answer(answer)
+                    if normalised is None:
+                        errors[question.key] = "invalid_date"
+                        continue
+                    answer = normalised
+                answers[question.key] = answer
+
+            if not errors:
+                try:
+                    result = await self._auth.async_submit_identity(answers)
+                except FuseAuthTransient:
+                    errors["base"] = "cannot_connect"
+                except FuseAuthError as err:
+                    _LOGGER.debug("Identity answers rejected: %s", err)
+                    errors["base"] = "invalid_identity"
+                else:
+                    return await self._async_handle_challenge(result)
+
+        schema = self._identity_schema()
+        if user_input is not None:
+            # One rejected answer should not cost the user the ones they got
+            # right, least of all a date of birth they have just typed out.
+            schema = self.add_suggested_values_to_schema(schema, user_input)
 
         return self.async_show_form(
             step_id="identity",
-            data_schema=self._identity_schema(),
+            data_schema=schema,
             errors=errors,
             description_placeholders={"prompt": self._identity_prompt},
         )
 
     def _identity_schema(self) -> vol.Schema:
-        """Build the form Fuse asked for. DATE questions get a date picker so
-        the value arrives in the YYYY-MM-DD shape the API demands."""
+        """Build the form Fuse asked for.
+
+        DATE questions use a text selector in date mode rather than
+        ``DateSelector``. Both yield the YYYY-MM-DD the API demands, but this
+        one renders a native ``<input type="date">``: you can type straight
+        into it, and on a phone it opens the platform picker, which has a year
+        control. ``DateSelector`` opens a calendar on the current month with
+        no way to jump, so a date of birth meant paging back one month at a
+        time -- roughly seven hundred times for someone born in the 1960s.
+        """
         fields: dict[Any, Any] = {}
         for question in self._questions:
             key = vol.Required(question.key)
             if question.kind == "DATE":
-                fields[key] = selector.DateSelector()
+                fields[key] = selector.TextSelector(
+                    selector.TextSelectorConfig(type=selector.TextSelectorType.DATE)
+                )
             else:
                 fields[key] = selector.TextSelector()
         return vol.Schema(fields)

@@ -167,7 +167,7 @@ pip install aiohttp
 python3 tests/test_fuse.py
 ```
 
-96 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
+112 cases. Home Assistant itself is stubbed; `aiohttp` is not, so the tests run
 against the real client — if you already have HA installed, it came with it.
 They run in CI on every push and pull request, alongside `hassfest` and HACS
 validation.

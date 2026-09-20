@@ -23,6 +23,7 @@ endpoint is what actually dispatches the message.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Any
 
 import aiohttp
@@ -73,6 +74,35 @@ class IdentityQuestion:
     key: str
     title: str
     kind: str  # "DATE" or "TEXT"; treat anything unrecognised as TEXT.
+
+
+# Day-first orderings, tried only after ISO. A browser with native date support
+# hands back YYYY-MM-DD already; these are for one that has degraded the field
+# to a plain text box, where a UK user types 04/03/1965.
+_DATE_FALLBACKS = ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y/%m/%d")
+
+
+def normalise_date_answer(value: str) -> str | None:
+    """Coerce a typed date into the YYYY-MM-DD shape Fuse demands.
+
+    Returns ``None`` if the value is not a date, which the config flow turns
+    into a field error rather than sending Fuse something it will reject.
+    ISO is tried first and strictly, so "04-03-1965" cannot be mistaken for
+    the fourth year of the common era.
+    """
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        pass
+    for fmt in _DATE_FALLBACKS:
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
 
 
 @dataclass(frozen=True, slots=True)
