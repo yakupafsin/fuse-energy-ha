@@ -26,10 +26,9 @@ dispatches the SMS, the version header the website expects, the endpoints as
 they now stand, and how the hourly figures settle in the days after they first
 appear.
 
-Both informed this project and the credit for that research is theirs.
+This project's sign-in follows that sequence, which he published first. An AI
+assistant used while preparing this for release had also read that repository.
 
+Both projects informed this one and the credit for that research is theirs.
 This acknowledgement is given because it is deserved, not because a licence
-compels it. No code from either project was copied into this one: both are
-public, and a file-by-file comparison shows no shared implementation. What is
-shared is knowledge about a third party's API -- endpoints, headers and
-protocol behaviour -- which is not itself anyone's to license.
+compels it.
