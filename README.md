@@ -195,10 +195,9 @@ dispatches the SMS, the version header the website expects, the endpoints as
 they now stand, and how the hourly figures settle over the days after they
 first appear.
 
-No code was copied from either project. That is checkable rather than merely
-asserted: both repositories are public, and a file-by-file comparison shows no
-shared implementation. What is owed is the protocol research, and it is
-acknowledged here and in [NOTICE](NOTICE).
+This integration's sign-in follows the sequence first published in
+[simonsolts/fuse-homeassistant](https://github.com/simonsolts/fuse-homeassistant).
+See [NOTICE](NOTICE).
 
 ## License
 
