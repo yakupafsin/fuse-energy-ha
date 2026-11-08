@@ -322,7 +322,10 @@ class FuseAuthFlow:
         try:
             async with self._session.post(
                 f"{WEB_BASE_URL}/api/trpc/phoneSignIn",
-                json={"phone": phone_number},
+                json={
+                    "phone": phone_number, 
+                    "supplyCountry": None,
+                },
                 headers={
                     "Content-Type": "application/json",
                     "x-fuse-app-version": WEB_APP_VERSION,

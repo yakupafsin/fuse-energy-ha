@@ -454,6 +454,7 @@ check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
 check("dispatch sends the version header",
       kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
 check("dispatch sends phone under 'phone'", kwargs["json"], {"phone": "+447700900123"})
+check("dispatch sends supplyCountry as none", kwargs["json"], {"supplyCountry": None})
 
 # --- config flow error keys --------------------------------------------------
 # Read the flow's source rather than importing it: config_flow pulls in

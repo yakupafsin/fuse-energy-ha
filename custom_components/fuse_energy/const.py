@@ -34,7 +34,7 @@ WEB_BASE_URL: str = "https://www.fuseenergy.com"
 # Fuse turns away anything it reads as too old -- so if OTP delivery starts
 # failing with a version complaint, this is the thing to bump. Read off the live
 # web app on 20 Sep 2026.
-WEB_APP_VERSION: str = "0.5.388"
+WEB_APP_VERSION: str = "0.5.417"
 
 # How far back to reach on the very first poll of a new config entry.
 INITIAL_BACKFILL_DAYS: int = 30
