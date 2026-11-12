@@ -35,10 +35,16 @@ from fuse_energy.auth import (  # noqa: E402
     FuseAuthError,
     FuseAuthFlow,
     FuseAuthTransient,
+    FuseClientOutdated,
     FuseSmsNotSent,
     normalise_date_answer,
 )
-from fuse_energy.const import WEB_APP_VERSION  # noqa: E402
+from fuse_energy.const import (  # noqa: E402
+    APP_VERSION_HEADER,
+    SIGN_IN_TIMEZONE,
+    WEB_APP_VERSION,
+    WEB_BASE_URL,
+)
 from homeassistant.components.recorder import statistics as stat_stub  # noqa: E402
 
 PASS, FAIL = [], []
@@ -348,8 +354,9 @@ check("skips malformed components",
 
 
 class _FakeResponse:
-    def __init__(self, status, body):
+    def __init__(self, status, body, headers=None):
         self.status, self._body = status, body
+        self.headers = headers or {}
 
     async def json(self, **_kw):
         return self._body
@@ -362,22 +369,22 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, body, status=200):
-        self._body, self._status = body, status
+    def __init__(self, body, status=200, headers=None):
+        self._body, self._status, self._headers = body, status, headers
         self.calls = []
 
     def post(self, url, **kw):
         self.calls.append((url, kw))
-        return _FakeResponse(self._status, self._body)
+        return _FakeResponse(self._status, self._body, self._headers)
 
 
-def dispatch(body, status=200):
+def dispatch(body, status=200, headers=None):
     """Run the SMS dispatch against a canned response.
 
     Returns (raised, session). `raised` is None when the dispatch was treated as
     successful, which is the case the original bug got wrong.
     """
-    session = _FakeSession(body, status)
+    session = _FakeSession(body, status, headers)
     flow = FuseAuthFlow(session, device_id="test-device")
     try:
         asyncio.run(flow._async_dispatch_sms("+447700900123"))
@@ -386,8 +393,8 @@ def dispatch(body, status=200):
     return None, session
 
 
-def code_of(body, status=200):
-    raised, _ = dispatch(body, status)
+def code_of(body, status=200, headers=None):
+    raised, _ = dispatch(body, status, headers)
     if raised is None:
         return None
     return "transient" if isinstance(raised, FuseAuthTransient) else raised.code
@@ -448,21 +455,57 @@ check("a body that merely mentions data dispatches",
 raised, sent = dispatch(rate_limited)
 check("dispatch failure is FuseSmsNotSent", isinstance(raised, FuseSmsNotSent), True)
 
-# The request itself: right endpoint, and the version header the gate reads.
-url, kwargs = sent.calls[0]
-check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
-check("dispatch sends the version header",
-      kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
-
-# The website's form sends these; a bare {"phone": ...} now gets HTTP 500.
-check("dispatch sends phone and an explicit null supplyCountry", kwargs["json"],
-      {"phone": "+447700900123", "supplyCountry": None})
-check("dispatch sends the timezone header", kwargs["headers"]["Timezone"], "Europe/London")
-check("dispatch sends an origin header", kwargs["headers"]["Origin"], "https://www.fuseenergy.com")
-check("dispatch sends a request id", len(kwargs["headers"]["x-request-id"]), 36)
-_, second = dispatch(rate_limited)
+# The request itself, checked on a refusal and on the clean path users take.
+raised, ok = dispatch({"result": {"data": {}}})
+check("a clean dispatch raises nothing", raised, None)
+for _label, _session in (("refused", sent), ("clean", ok)):
+    url, kwargs = _session.calls[0]
+    check(f"{_label} dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
+    check(f"{_label} dispatch sends the version header",
+          kwargs["headers"][APP_VERSION_HEADER], WEB_APP_VERSION)
+    # The website's form sends these; a bare {"phone": ...} now gets HTTP 500.
+    check(f"{_label} dispatch sends phone and an explicit null supplyCountry",
+          kwargs["json"], {"phone": "+447700900123", "supplyCountry": None})
+    check(f"{_label} dispatch sends the timezone header",
+          kwargs["headers"]["Timezone"], SIGN_IN_TIMEZONE)
+    check(f"{_label} dispatch sends an origin header", kwargs["headers"]["Origin"], WEB_BASE_URL)
+    check(f"{_label} dispatch sends a request id", len(kwargs["headers"]["x-request-id"]), 36)
 check("request id is unique per dispatch",
-      kwargs["headers"]["x-request-id"] != second.calls[0][1]["headers"]["x-request-id"], True)
+      sent.calls[0][1]["headers"]["x-request-id"] != ok.calls[0][1]["headers"]["x-request-id"],
+      True)
+
+# --- 19. A 5xx from the dispatch is not automatically "check your internet" ---
+# Fuse answers a stale x-fuse-app-version with HTTP 500. Treating every 5xx as
+# transient told users their connection was at fault while sign-in was broken
+# for everyone (#21, #24).
+_reload = {"error": {"message": "Please reload", "code": -32603,
+                     "data": {"code": "INTERNAL_SERVER_ERROR", "httpStatus": 500,
+                              "____reloadRequired": True}}}
+_newer = {APP_VERSION_HEADER: "9.9.999"}
+check("a reload-required 500 is FuseClientOutdated",
+      isinstance(dispatch(_reload, 500)[0], FuseClientOutdated), True)
+check("reload-required is found inside a batch", code_of([_reload], 500), "app_outdated")
+check("reload-required is found under superjson",
+      code_of({"error": {"json": _reload["error"]}}, 500), "app_outdated")
+check("reload-required outside an error is ignored",
+      code_of({"data": {"____reloadRequired": True}}, 500), "transient")
+check("a 500 echoing a newer app version is app_outdated",
+      code_of({"error": {"message": "boom"}}, 500, _newer), "app_outdated")
+
+_boom = {"error": {"message": "Something went wrong", "code": -32603,
+                   "data": {"code": "INTERNAL_SERVER_ERROR", "httpStatus": 500}}}
+check("a 500 echoing our own version is not blamed on the version",
+      code_of(_boom, 500, {APP_VERSION_HEADER: WEB_APP_VERSION}), "http_500")
+check("a 500 with a JSON error is a refusal, not a connection problem",
+      code_of(_boom, 500), "http_500")
+check("the refusal carries Fuse's reason for the log",
+      "Something went wrong" in str(dispatch(_boom, 500)[0]), True)
+check("reload-required false is not app_outdated",
+      code_of({"error": {"message": "x", "data": {"____reloadRequired": False}}}, 500),
+      "http_500")
+check("a 502 with no body is still transient", code_of(None, 502), "transient")
+check("a 200 that echoes a newer version still dispatches",
+      code_of({"result": {"data": {}}}, 200, _newer), None)
 
 # --- config flow error keys --------------------------------------------------
 # Read the flow's source rather than importing it: config_flow pulls in

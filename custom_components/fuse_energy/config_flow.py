@@ -24,6 +24,7 @@ from .auth import (
     FuseAuthError,
     FuseAuthFlow,
     FuseAuthTransient,
+    FuseClientOutdated,
     FuseSmsNotSent,
     IdentityQuestion,
     NeedsIdentity,
@@ -96,13 +97,20 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await self._auth.async_request_code(self._phone_number)
             except FuseAuthTransient as err:
-                _LOGGER.debug("Transient failure requesting a code: %s", err)
+                # Warning, not debug: the user is looking at an error on screen
+                # right now, and a debug line is invisible on a default install.
+                _LOGGER.warning("Could not reach Fuse requesting a code: %s", err)
                 errors["base"] = "cannot_connect"
             # Which leg failed decides what is true to tell the user, and only
             # auth.py knows that -- the two legs report errors in different
             # vocabularies. Reaching FuseSmsNotSent means the number was good
             # enough to start a flow, so blaming the number would be wrong;
             # a failure from the first leg is almost always the number itself.
+            except FuseClientOutdated as err:
+                # Ours to fix, not the user's: warn so it is in the log when
+                # someone reports it, and tell the user to update.
+                _LOGGER.warning("%s", err)
+                errors["base"] = "app_outdated"
             except FuseSmsNotSent as err:
                 if explained := _SMS_REFUSALS.get(err.code or ""):
                     _LOGGER.debug("Fuse declined to send the SMS: %s", err)
