@@ -22,6 +22,7 @@ endpoint is what actually dispatches the message.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -60,6 +61,18 @@ class FuseSmsNotSent(FuseAuthError):
     flow, so "we could not send you a code" is safe to tell the user; a failure
     from the first leg is not.
     """
+
+
+class FuseClientOutdated(FuseSmsNotSent):
+    """Fuse refused the SMS because it reads this integration as out of date.
+
+    Ours to fix, not the user's: only a release with a newer
+    :data:`~.const.WEB_APP_VERSION` gets past it. A subclass of
+    :class:`FuseSmsNotSent` because that is still what happened.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="app_outdated")
 
 
 class FuseAuthTransient(Exception):
@@ -188,8 +201,8 @@ async def _json_or_empty(response: aiohttp.ClientResponse) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _refusal_code(payload: Any) -> str | None:
-    """Find Fuse's refusal code in a dispatch body, whatever envelope it used.
+def _errors(payload: Any) -> Iterator[Any]:
+    """Yield every tRPC error container in a dispatch body, innermost first.
 
     tRPC does not have one error envelope, it has several: the procedure's own
     ``result.data.error``, a transport-level top-level ``error``, either wrapped
@@ -198,21 +211,32 @@ def _refusal_code(payload: Any) -> str | None:
     shape of the body -- which leaves the same silent failure for every other
     shape, and a silent failure here is indistinguishable from success.
 
-    Only containers actually named ``error`` are searched. Missing a shape costs
-    one confused user; a false positive breaks sign-in for everyone it currently
-    works for, so the asymmetry is deliberate.
+    Only containers actually named ``error`` are yielded, and every reader below
+    looks only inside them. Missing a shape costs one confused user; a false
+    positive breaks sign-in for everyone it currently works for, so the
+    asymmetry is deliberate.
     """
     if isinstance(payload, list):
-        return next(filter(None, map(_refusal_code, payload)), None)
+        for item in payload:
+            yield from _errors(item)
+        return
     if not isinstance(payload, dict):
-        return None
+        return
     for key in ("json", "result", "data"):
         if (nested := payload.get(key)) is not None:
-            if code := _refusal_code(nested):
-                return code
+            yield from _errors(nested)
     if (error := payload.get("error")) is not None:
-        return _code_in_error(error)
-    return None
+        yield error
+
+
+def _first(read: Callable[[Any], Any], payload: Any) -> Any:
+    """The first truthy answer ``read`` gives for any error container."""
+    return next(filter(None, map(read, _errors(payload))), None)
+
+
+def _refusal_code(payload: Any) -> str | None:
+    """Find Fuse's refusal code in a dispatch body, whatever envelope it used."""
+    return _first(_code_in_error, payload)
 
 
 def _code_in_error(error: Any) -> str | None:
@@ -235,43 +259,32 @@ def _code_in_error(error: Any) -> str | None:
     return None
 
 
-def _reload_required(payload: Any) -> bool:
-    """True if Fuse flagged the request as coming from an out-of-date client.
-
-    The website's tRPC client reloads itself when a 500 carries a truthy
-    ``____reloadRequired`` in its error data. Searched for anywhere in the body
-    rather than at one path, for the same reason :func:`_refusal_code` is: tRPC
-    has several envelopes, and this flag is only useful if it is found.
-    """
-    if isinstance(payload, list):
-        return any(map(_reload_required, payload))
-    if not isinstance(payload, dict):
-        return False
-    if payload.get("____reloadRequired"):
-        return True
-    return any(_reload_required(value) for value in payload.values())
-
-
-def _error_message(payload: Any) -> str | None:
-    """Fuse's human-readable reason from a tRPC error body, if it gave one.
+def _message_in_error(error: Any) -> str | None:
+    """Fuse's human-readable reason from an error container, if it gave one.
 
     Only for the log: the user-facing message comes from the error key, but the
     log is where someone diagnosing a refusal will look, and "500" alone is what
     left #21 and #24 with nothing to go on.
     """
-    if isinstance(payload, list):
-        return next(filter(None, map(_error_message, payload)), None)
-    if not isinstance(payload, dict):
+    if not isinstance(error, dict):
         return None
-    if isinstance(error := payload.get("error"), dict):
-        if isinstance(message := error.get("message"), str) and message:
-            return message
-        return _error_message(error)
-    for key in ("json", "result", "data"):
-        if (nested := payload.get(key)) is not None:
-            if message := _error_message(nested):
-                return message
-    return None
+    if isinstance(message := error.get("message"), str) and message:
+        return message
+    return _message_in_error(error.get("json"))
+
+
+def _reload_in_error(error: Any) -> bool:
+    """True if this error container flags the client as out of date.
+
+    The website's tRPC client reloads itself when a 500 carries a truthy
+    ``____reloadRequired`` in its error data (under ``json`` with superjson).
+    """
+    if not isinstance(error, dict):
+        return False
+    data = error.get("data")
+    if isinstance(data, dict) and data.get("____reloadRequired"):
+        return True
+    return _reload_in_error(error.get("json"))
 
 
 def _raise_for_server_error(response: aiohttp.ClientResponse, body: Any) -> None:
@@ -283,18 +296,17 @@ def _raise_for_server_error(response: aiohttp.ClientResponse, body: Any) -> None
     """
     status = response.status
     served = response.headers.get(APP_VERSION_HEADER)
-    if _reload_required(body) or (served and served != WEB_APP_VERSION):
-        raise FuseSmsNotSent(
+    if _first(_reload_in_error, body) or (served and served != WEB_APP_VERSION):
+        raise FuseClientOutdated(
             f"Fuse rejected the sign-in as coming from an out-of-date client "
             f"(HTTP {status}; sent {APP_VERSION_HEADER} {WEB_APP_VERSION}, "
             f"Fuse is on {served or 'an unstated version'}). "
-            f"WEB_APP_VERSION in const.py needs bumping",
-            code="app_outdated",
+            f"WEB_APP_VERSION in const.py needs bumping"
         )
     # Only an error Fuse actually explained counts as a refusal. An empty or
     # reason-less body is what an outage looks like, and that is still worth a
     # retry rather than a "Fuse did not send a code" the user can do nothing with.
-    if reason := _error_message(body) or _refusal_code(body):
+    if reason := _first(_message_in_error, body) or _refusal_code(body):
         raise FuseSmsNotSent(
             f"Fuse's website returned HTTP {status} dispatching the SMS: {reason}",
             code=f"http_{status}",
