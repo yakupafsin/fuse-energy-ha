@@ -25,10 +25,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
+import uuid
 
 import aiohttp
 
-from .const import API_BASE_URL, WEB_APP_VERSION, WEB_BASE_URL
+from .const import API_BASE_URL, FUSE_TIMEZONE, WEB_APP_VERSION, WEB_BASE_URL
 
 _TIMEOUT = aiohttp.ClientTimeout(total=20)
 
@@ -318,14 +319,22 @@ class FuseAuthFlow:
         with an HTTP 200. Checking only the status code made every failure look
         like a success: the flow advanced to the code step and the user waited
         for a message that was never sent. The body is the authority here.
+
+        The request mirrors the website's sign-in form: a bare ``{"phone": ...}``
+        now gets HTTP 500. The form sends ``supplyCountry`` as an explicit null
+        plus ``Timezone``, ``x-request-id`` and ``Origin`` headers; which of
+        these Fuse strictly needs has not been isolated.
         """
         try:
             async with self._session.post(
                 f"{WEB_BASE_URL}/api/trpc/phoneSignIn",
-                json={"phone": phone_number},
+                json={"phone": phone_number, "supplyCountry": None},
                 headers={
                     "Content-Type": "application/json",
                     "x-fuse-app-version": WEB_APP_VERSION,
+                    "Timezone": FUSE_TIMEZONE,
+                    "x-request-id": str(uuid.uuid4()),
+                    "Origin": WEB_BASE_URL,
                 },
                 timeout=_TIMEOUT,
             ) as response:

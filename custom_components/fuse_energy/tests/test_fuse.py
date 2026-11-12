@@ -453,7 +453,16 @@ url, kwargs = sent.calls[0]
 check("dispatch hits phoneSignIn", url.endswith("/api/trpc/phoneSignIn"), True)
 check("dispatch sends the version header",
       kwargs["headers"]["x-fuse-app-version"], WEB_APP_VERSION)
-check("dispatch sends phone under 'phone'", kwargs["json"], {"phone": "+447700900123"})
+
+# The website's form sends these; a bare {"phone": ...} now gets HTTP 500.
+check("dispatch sends phone and an explicit null supplyCountry", kwargs["json"],
+      {"phone": "+447700900123", "supplyCountry": None})
+check("dispatch sends the timezone header", kwargs["headers"]["Timezone"], "Europe/London")
+check("dispatch sends an origin header", kwargs["headers"]["Origin"], "https://www.fuseenergy.com")
+check("dispatch sends a request id", len(kwargs["headers"]["x-request-id"]), 36)
+_, second = dispatch(rate_limited)
+check("request id is unique per dispatch",
+      kwargs["headers"]["x-request-id"] != second.calls[0][1]["headers"]["x-request-id"], True)
 
 # --- config flow error keys --------------------------------------------------
 # Read the flow's source rather than importing it: config_flow pulls in
