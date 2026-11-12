@@ -49,7 +49,14 @@ _LOGGER = logging.getLogger(__name__)
 _SMS_REFUSALS: dict[str, str] = {
     "incorrect_phone_number": "invalid_phone",
     "issue_otp_premature_retry": "sms_too_soon",
+    # Raised by auth.py itself, not sent by Fuse: Fuse rejected our app version.
+    "app_outdated": "app_outdated",
 }
+
+# Refusals that are ours to fix rather than the user's. They get specific advice
+# like the rest, but also a warning in the log, because the user's message
+# ("update the integration") is only useful once a fixed release exists.
+_REFUSALS_TO_LOG: frozenset[str] = frozenset({"app_outdated"})
 
 # Fuse expects E.164. Nudging the user here avoids a round-trip through a
 # server-side validation error that only says "422".
@@ -96,7 +103,9 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await self._auth.async_request_code(self._phone_number)
             except FuseAuthTransient as err:
-                _LOGGER.debug("Transient failure requesting a code: %s", err)
+                # Warning, not debug: the user is looking at an error on screen
+                # right now, and a debug line is invisible on a default install.
+                _LOGGER.warning("Could not reach Fuse requesting a code: %s", err)
                 errors["base"] = "cannot_connect"
             # Which leg failed decides what is true to tell the user, and only
             # auth.py knows that -- the two legs report errors in different
@@ -105,7 +114,12 @@ class FuseConfigFlow(ConfigFlow, domain=DOMAIN):
             # a failure from the first leg is almost always the number itself.
             except FuseSmsNotSent as err:
                 if explained := _SMS_REFUSALS.get(err.code or ""):
-                    _LOGGER.debug("Fuse declined to send the SMS: %s", err)
+                    log = (
+                        _LOGGER.warning
+                        if err.code in _REFUSALS_TO_LOG
+                        else _LOGGER.debug
+                    )
+                    log("Fuse declined to send the SMS: %s", err)
                     errors["base"] = explained
                 else:
                     _LOGGER.warning("Fuse did not send the verification SMS: %s", err)

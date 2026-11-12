@@ -38,7 +38,7 @@ from fuse_energy.auth import (  # noqa: E402
     FuseSmsNotSent,
     normalise_date_answer,
 )
-from fuse_energy.const import WEB_APP_VERSION  # noqa: E402
+from fuse_energy.const import SIGN_IN_TIMEZONE, WEB_APP_VERSION  # noqa: E402
 from homeassistant.components.recorder import statistics as stat_stub  # noqa: E402
 
 PASS, FAIL = [], []
@@ -348,8 +348,9 @@ check("skips malformed components",
 
 
 class _FakeResponse:
-    def __init__(self, status, body):
+    def __init__(self, status, body, headers=None):
         self.status, self._body = status, body
+        self.headers = headers or {}
 
     async def json(self, **_kw):
         return self._body
@@ -362,22 +363,22 @@ class _FakeResponse:
 
 
 class _FakeSession:
-    def __init__(self, body, status=200):
-        self._body, self._status = body, status
+    def __init__(self, body, status=200, headers=None):
+        self._body, self._status, self._headers = body, status, headers
         self.calls = []
 
     def post(self, url, **kw):
         self.calls.append((url, kw))
-        return _FakeResponse(self._status, self._body)
+        return _FakeResponse(self._status, self._body, self._headers)
 
 
-def dispatch(body, status=200):
+def dispatch(body, status=200, headers=None):
     """Run the SMS dispatch against a canned response.
 
     Returns (raised, session). `raised` is None when the dispatch was treated as
     successful, which is the case the original bug got wrong.
     """
-    session = _FakeSession(body, status)
+    session = _FakeSession(body, status, headers)
     flow = FuseAuthFlow(session, device_id="test-device")
     try:
         asyncio.run(flow._async_dispatch_sms("+447700900123"))
@@ -386,8 +387,8 @@ def dispatch(body, status=200):
     return None, session
 
 
-def code_of(body, status=200):
-    raised, _ = dispatch(body, status)
+def code_of(body, status=200, headers=None):
+    raised, _ = dispatch(body, status, headers)
     if raised is None:
         return None
     return "transient" if isinstance(raised, FuseAuthTransient) else raised.code
@@ -457,12 +458,56 @@ check("dispatch sends the version header",
 # The website's form sends these; a bare {"phone": ...} now gets HTTP 500.
 check("dispatch sends phone and an explicit null supplyCountry", kwargs["json"],
       {"phone": "+447700900123", "supplyCountry": None})
-check("dispatch sends the timezone header", kwargs["headers"]["Timezone"], "Europe/London")
+check("dispatch sends the timezone header", kwargs["headers"]["Timezone"], SIGN_IN_TIMEZONE)
 check("dispatch sends an origin header", kwargs["headers"]["Origin"], "https://www.fuseenergy.com")
 check("dispatch sends a request id", len(kwargs["headers"]["x-request-id"]), 36)
 _, second = dispatch(rate_limited)
 check("request id is unique per dispatch",
       kwargs["headers"]["x-request-id"] != second.calls[0][1]["headers"]["x-request-id"], True)
+
+# The shape checks above all ran on a refusal. Check it on the path users take.
+raised, ok = dispatch({"result": {"data": {}}})
+check("a clean dispatch raises nothing", raised, None)
+check("a clean dispatch sends the same request shape",
+      (ok.calls[0][1]["json"], ok.calls[0][1]["headers"]["x-fuse-app-version"],
+       ok.calls[0][1]["headers"]["Timezone"], ok.calls[0][1]["headers"]["Origin"]),
+      ({"phone": "+447700900123", "supplyCountry": None}, WEB_APP_VERSION,
+       SIGN_IN_TIMEZONE, "https://www.fuseenergy.com"))
+
+# --- 19. A 5xx from the dispatch is not automatically "check your internet" ---
+# Fuse answers a stale x-fuse-app-version with HTTP 500. Treating every 5xx as
+# transient told users their connection was at fault while sign-in was broken
+# for everyone (#21, #24).
+_reload = {"error": {"message": "Please reload", "code": -32603,
+                     "data": {"code": "INTERNAL_SERVER_ERROR", "httpStatus": 500,
+                              "____reloadRequired": True}}}
+check("a reload-required 500 is app_outdated", code_of(_reload, 500), "app_outdated")
+check("reload-required is found inside a batch", code_of([_reload], 500), "app_outdated")
+check("reload-required is found under superjson",
+      code_of({"error": {"json": _reload["error"]}}, 500), "app_outdated")
+check("a 500 echoing a newer app version is app_outdated",
+      code_of({"error": {"message": "boom"}}, 500, {"x-fuse-app-version": "9.9.999"}),
+      "app_outdated")
+check("an out-of-date client is told why",
+      isinstance(dispatch(_reload, 500)[0], FuseSmsNotSent), True)
+
+_boom = {"error": {"message": "Something went wrong", "code": -32603,
+                   "data": {"code": "INTERNAL_SERVER_ERROR", "httpStatus": 500}}}
+check("a 500 echoing our own version is not blamed on the version",
+      code_of(_boom, 500, {"x-fuse-app-version": WEB_APP_VERSION}), "http_500")
+check("a 500 with a JSON error is a refusal, not a connection problem",
+      code_of(_boom, 500), "http_500")
+check("the refusal carries Fuse's reason for the log",
+      "Something went wrong" in str(dispatch(_boom, 500)[0]), True)
+check("reload-required false is not app_outdated",
+      code_of({"error": {"message": "x", "data": {"____reloadRequired": False}}}, 500),
+      "http_500")
+
+check("a 502 with no body is still transient", code_of(None, 502), "transient")
+check("a 503 with no body is still transient", code_of(None, 503), "transient")
+check("a 500 with an empty JSON body is still transient", code_of({}, 500), "transient")
+check("a 200 that echoes a newer version still dispatches",
+      code_of({"result": {"data": {}}}, 200, {"x-fuse-app-version": "9.9.999"}), None)
 
 # --- config flow error keys --------------------------------------------------
 # Read the flow's source rather than importing it: config_flow pulls in
@@ -485,6 +530,8 @@ check("premature retry gets its own message",
       refusals.get("issue_otp_premature_retry"), "sms_too_soon")
 check("a rejected number is still blamed on the number",
       refusals.get("incorrect_phone_number"), "invalid_phone")
+check("an out-of-date client gets its own message",
+      refusals.get("app_outdated"), "app_outdated")
 
 # Every key the flow can put in errors["base"], however it gets there.
 assigned = {

@@ -33,8 +33,21 @@ WEB_BASE_URL: str = "https://www.fuseenergy.com"
 # The website's sign-in call carries this as an x-fuse-app-version header, and
 # Fuse turns away anything it reads as too old -- so if OTP delivery starts
 # failing with a version complaint, this is the thing to bump. Read off the live
-# web app on 20 Sep 2026.
-WEB_APP_VERSION: str = "0.5.388"
+# web app on 12 Nov 2026 (previously 0.5.388; the bump was first spotted in #23).
+#
+# Fuse's answer to a stale version is an HTTP 500, not a 4xx: the website's own
+# tRPC client treats a 500 carrying ``____reloadRequired``, or a response whose
+# x-fuse-app-version differs from its own, as "reload to get the new build".
+# auth.py reads the same two signals and reports them as ``app_outdated``.
+WEB_APP_VERSION: str = "0.5.417"
+APP_VERSION_HEADER: str = "x-fuse-app-version"
+
+# The website sends the browser's IANA zone as a Timezone header on sign-in.
+# Fuse only supplies Great Britain, so a UK zone is what a real customer's
+# browser sends. Deliberately separate from FUSE_TIMEZONE: that one decides how
+# chart bars are bucketed, and changing it must not silently change what the
+# sign-in request looks like.
+SIGN_IN_TIMEZONE: str = "Europe/London"
 
 # How far back to reach on the very first poll of a new config entry.
 INITIAL_BACKFILL_DAYS: int = 30

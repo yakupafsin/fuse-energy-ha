@@ -29,7 +29,13 @@ import uuid
 
 import aiohttp
 
-from .const import API_BASE_URL, FUSE_TIMEZONE, WEB_APP_VERSION, WEB_BASE_URL
+from .const import (
+    API_BASE_URL,
+    APP_VERSION_HEADER,
+    SIGN_IN_TIMEZONE,
+    WEB_APP_VERSION,
+    WEB_BASE_URL,
+)
 
 _TIMEOUT = aiohttp.ClientTimeout(total=20)
 
@@ -229,6 +235,75 @@ def _code_in_error(error: Any) -> str | None:
     return None
 
 
+def _reload_required(payload: Any) -> bool:
+    """True if Fuse flagged the request as coming from an out-of-date client.
+
+    The website's tRPC client reloads itself when a 500 carries a truthy
+    ``____reloadRequired`` in its error data. Searched for anywhere in the body
+    rather than at one path, for the same reason :func:`_refusal_code` is: tRPC
+    has several envelopes, and this flag is only useful if it is found.
+    """
+    if isinstance(payload, list):
+        return any(map(_reload_required, payload))
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("____reloadRequired"):
+        return True
+    return any(_reload_required(value) for value in payload.values())
+
+
+def _error_message(payload: Any) -> str | None:
+    """Fuse's human-readable reason from a tRPC error body, if it gave one.
+
+    Only for the log: the user-facing message comes from the error key, but the
+    log is where someone diagnosing a refusal will look, and "500" alone is what
+    left #21 and #24 with nothing to go on.
+    """
+    if isinstance(payload, list):
+        return next(filter(None, map(_error_message, payload)), None)
+    if not isinstance(payload, dict):
+        return None
+    if isinstance(error := payload.get("error"), dict):
+        if isinstance(message := error.get("message"), str) and message:
+            return message
+        return _error_message(error)
+    for key in ("json", "result", "data"):
+        if (nested := payload.get(key)) is not None:
+            if message := _error_message(nested):
+                return message
+    return None
+
+
+def _raise_for_server_error(response: aiohttp.ClientResponse, body: Any) -> None:
+    """Raise the right error for a 5xx from the SMS dispatch.
+
+    See :meth:`FuseAuthFlow._async_dispatch_sms` for why a 5xx is not simply
+    transient. The echoed version header counts only when Fuse sent one and it
+    differs: a missing header proves nothing either way.
+    """
+    status = response.status
+    served = response.headers.get(APP_VERSION_HEADER)
+    if _reload_required(body) or (served and served != WEB_APP_VERSION):
+        raise FuseSmsNotSent(
+            f"Fuse rejected the sign-in as coming from an out-of-date client "
+            f"(HTTP {status}; sent {APP_VERSION_HEADER} {WEB_APP_VERSION}, "
+            f"Fuse is on {served or 'an unstated version'}). "
+            f"WEB_APP_VERSION in const.py needs bumping",
+            code="app_outdated",
+        )
+    # Only an error Fuse actually explained counts as a refusal. An empty or
+    # reason-less body is what an outage looks like, and that is still worth a
+    # retry rather than a "Fuse did not send a code" the user can do nothing with.
+    if reason := _error_message(body) or _refusal_code(body):
+        raise FuseSmsNotSent(
+            f"Fuse's website returned HTTP {status} dispatching the SMS: {reason}",
+            code=f"http_{status}",
+        )
+    raise FuseAuthTransient(
+        f"Fuse's website returned HTTP {status} with no explanation dispatching the SMS"
+    )
+
+
 def _interpret(payload: dict[str, Any]) -> ChallengeResult:
     """Turn a challenge response into either tokens or a question set."""
     challenge = payload.get("challenge_type")
@@ -324,6 +399,17 @@ class FuseAuthFlow:
         now gets HTTP 500. The form sends ``supplyCountry`` as an explicit null
         plus ``Timezone``, ``x-request-id`` and ``Origin`` headers; which of
         these Fuse strictly needs has not been isolated.
+
+        A 5xx is not automatically "try again later". Fuse answers a stale
+        :data:`WEB_APP_VERSION` with a 500, and treating that as transient told
+        every user to check their internet connection while sign-in was broken
+        for all of them (#21, #24). So a 5xx is split three ways:
+
+        * Fuse says the client is too old -> ``app_outdated``, which only a new
+          release of this integration can fix;
+        * Fuse explained the error (a message or code) -> a refusal carrying
+          that reason, so it reaches the log at warning level instead of debug;
+        * no explanation (a gateway page, an empty body) -> genuinely transient.
         """
         try:
             async with self._session.post(
@@ -331,18 +417,17 @@ class FuseAuthFlow:
                 json={"phone": phone_number, "supplyCountry": None},
                 headers={
                     "Content-Type": "application/json",
-                    "x-fuse-app-version": WEB_APP_VERSION,
-                    "Timezone": FUSE_TIMEZONE,
+                    APP_VERSION_HEADER: WEB_APP_VERSION,
+                    "Timezone": SIGN_IN_TIMEZONE,
                     "x-request-id": str(uuid.uuid4()),
                     "Origin": WEB_BASE_URL,
                 },
                 timeout=_TIMEOUT,
             ) as response:
+                body = await _json_body(response)
                 if response.status >= 500:
-                    raise FuseAuthTransient(
-                        f"Fuse's website returned {response.status} dispatching the SMS"
-                    )
-                code = _refusal_code(await _json_body(response))
+                    _raise_for_server_error(response, body)
+                code = _refusal_code(body)
                 if code is None and response.status >= 300:
                     # A refusal with no parseable body still has to surface: an
                     # unexplained 4xx that returns quietly puts the user back on
